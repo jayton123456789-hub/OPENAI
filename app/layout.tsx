@@ -2,14 +2,14 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Veilbound — A Game of Hidden Identities",
+  title: "MaskLife Games — Veilbound & Realm Roll",
   description:
-    "Enter the circle, inquire after masked identities, bank matching Echoes, and race to seven Bounds.",
-  applicationName: "Veilbound",
+    "Play Veilbound and Realm Roll: polished mobile games for solo, local, and private two-device play.",
+  applicationName: "MaskLife Games",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Veilbound",
+    title: "MaskLife Games",
   },
   other: {
     "codex-preview": "development",

@@ -1,5 +1,5 @@
-import VeilboundGame from "./veilbound-game";
+import CollectionHome from "./collection-home";
 
 export default function Home() {
-  return <VeilboundGame />;
+  return <CollectionHome />;
 }

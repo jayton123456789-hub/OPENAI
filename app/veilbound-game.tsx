@@ -1,6 +1,7 @@
 "use client";
 
 import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   BankedBound,
   bankableGroups,
@@ -494,7 +495,10 @@ function TitleScreen({
     <section className="titleScreen">
       <div className="titleAtmosphere" aria-hidden="true"><i /><i /><i /></div>
       <div className="titleTopbar">
-        <button className="textIcon" type="button" onClick={onRules}>Rules</button>
+        <div className="titleTopbarGroup">
+          <Link className="textIcon" href="/">Games</Link>
+          <button className="textIcon" type="button" onClick={onRules}>Rules</button>
+        </div>
         <button className="textIcon" type="button" onClick={onSettings}>Settings</button>
       </div>
       <div className="titleMark">

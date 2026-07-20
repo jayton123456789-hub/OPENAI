@@ -1,12 +1,29 @@
-# Veilbound
+# MaskLife Games
 
-Veilbound is a complete portrait-first card game about masked identities, hidden information, and memory. Players inquire after identities already held in their hand, decide when to protect matching cards in a public Bank, and race to seven Bounds.
+MaskLife Games is a portrait-first mobile game collection. The current release includes two complete titles: **Veilbound**, a hidden-information card game about masked identities, and **Realm Roll**, a fantasy Skee-Ball duel built around target selection and two-tap timing.
+
+## Realm Roll 1.0
+
+- Three rounds with five balls per player, followed by Sudden Roll tiebreakers when needed
+- Seven physical scoring targets: 10, 20, 30, 40, 50, and two difficult 100-point Dragon Gates
+- Tap a target, lock power, then lock accuracy—no dragging
+- Deterministic ball flight with visible impacts, neighboring-ring catches, clear misses, and score receipts
+- Solo play against one or two pressure-aware AI rivals at Novice, Adept, or Royal difficulty
+- Two-to-four-player pass-and-play with private handoff curtains
+- Private two-device invitations with server-authoritative rolls and hidden random state
+- Complete eight-step tutorial, rules, pause, settings, shot history, rematch, and Chronicle flows
+- Sound, haptic, high-contrast, and reduced-motion options
+- Responsive fantasy cabinet, ramp, ball-flight, target, and celebration animations
+
+## Veilbound Second Edition 2.0
+
+Veilbound is a complete card game about asking for masked identities, deciding when to protect matching cards in a public Bank, and racing to seven Bounds. When a rival has none of the requested identity, the official response is:
 
 When a rival has none of the requested identity, the official response is:
 
 > **Draw from the Veil.**
 
-## Finished Second Edition 2.0 features
+### Features
 
 - Familiar 52-card identity cycle backed by an endless central Veil that automatically reshuffles
 - Deliberate risk-and-reward Bank: pairs score 1 Bound, trios score 2, and four-card sets score 3
@@ -26,9 +43,9 @@ When a rival has none of the requested identity, the official response is:
 - Original generated botanical artwork, masked portrait set, and card-back design
 - Deterministic engine tests, including complete local and privacy-sanitized online match simulations
 
-## Collection
+## Collection roadmap
 
-Veilbound is the first playable title in the planned MaskLife game collection: **Veilbound**, **Realm Roll**, **Kings Cups**, and **Wicked Words**. The companion titles remain intentionally absent from the interface until each is fully designed and playable.
+The four locked titles are **Veilbound**, **Realm Roll**, **Kings Cups**, and **Wicked Words**. Kings Cups will be an original cup-pong game. Wicked Words will be an original fill-in-the-blank party card game with separate regular and age-gated 18+ decks. Unfinished games remain absent from the playable library until they work end to end.
 
 ## Run locally
 
@@ -46,15 +63,15 @@ npm test
 
 ## Project structure
 
-- `app/veilbound-game.tsx` — complete interactive game application
-- `lib/veilbound.ts` — deterministic rules engine and AI decision system
-- `lib/online-room.ts` — private per-seat online view model
-- `lib/online-room-server.ts` — server-authoritative invitation and turn service
-- `app/api/rooms/` — create, join, reconnect, and action endpoints
+- `app/collection-home.tsx` — collection library and navigation
+- `app/veilbound-game.tsx` and `app/realm-roll-game.tsx` — complete interactive game clients
+- `lib/veilbound.ts` and `lib/realm-roll.ts` — deterministic rules engines and AI systems
+- `lib/online-room*.ts` and `lib/realm-online-room*.ts` — private online view models and services
+- `app/api/rooms/` and `app/api/realm-rooms/` — private multiplayer endpoints
 - `db/` and `drizzle/` — D1 room schema and migration
 - `public/assets/` — optimized runtime artwork
 - `art-source/generated/` — source generations retained in the primary project checkout
 - `docs/` — rules, art direction, and expansion architecture
-- `tests/game.test.mjs` — rules and full-match regression tests
+- `tests/game.test.mjs` and `tests/realm-roll.test.mjs` — rules and full-match regression tests
 
-The game is intentionally isolated as its own component and engine so Realm Roll, Kings Cups, and Wicked Words can join a shared game hub without rewriting Veilbound.
+Each title is isolated behind its own component, engine, save state, online room, and tests so future games can join the shared library without destabilizing the finished releases.

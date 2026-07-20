@@ -45,3 +45,26 @@ test("uses clear Ask and Bank flows with an endless Veil and explicit handoffs",
   assert.match(source, /className="resolutionAction"/);
   assert.doesNotMatch(source, /onPointerDrop|pointerDragging|dragReady/);
 });
+
+test("ships the collection hub and Realm Roll as complete routes", async () => {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("realm-test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  const env = { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+
+  for (const path of ["/", "/veilbound", "/realm-roll"]) {
+    const response = await worker.fetch(new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }), env, ctx);
+    assert.equal(response.status, 200, `${path} renders`);
+  }
+
+  const source = await readFile(new URL("../app/realm-roll-game.tsx", import.meta.url), "utf8");
+  assert.match(source, /A fantasy Skee-Ball game/);
+  assert.match(source, /LOCK TARGET/);
+  assert.match(source, /LOCK POWER/);
+  assert.match(source, /ROLL THE BALL/);
+  assert.match(source, /You never drag the ball/);
+  assert.match(source, /Private lane/);
+  assert.match(source, /Practice against a Novice/);
+  assert.doesNotMatch(source, /onPointerDrop|draggable=true|dragReady/);
+});

@@ -1,21 +1,23 @@
 import { ensureRoomsSchema, getRoomsDb } from "@/db/rooms";
-import type { OnlineRoomRow } from "@/db/schema";
-import { createGame, resolveBank, resolveInquiry, upgradeGameState, type GameState } from "@/lib/veilbound";
+import type { RealmRoomRow } from "@/db/schema";
 import {
-  createOnlineGameView,
-  type OnlineAction,
-  type OnlineRoomStatus,
-  type OnlineRoomView,
-} from "@/lib/online-room";
+  createRealmGame,
+  resolveRealmShot,
+  upgradeRealmGameState,
+  type RealmGameState,
+} from "@/lib/realm-roll";
+import {
+  createRealmOnlineGameView,
+  type RealmOnlineAction,
+  type RealmRoomStatus,
+  type RealmRoomView,
+} from "@/lib/realm-online-room";
 
 const ROOM_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-export class OnlineRoomError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-  ) {
+export class RealmRoomError extends Error {
+  constructor(message: string, public readonly status: number) {
     super(message);
   }
 }
@@ -55,21 +57,21 @@ function safeEqual(left: string, right: string) {
   return difference === 0;
 }
 
-function parseState(row: OnlineRoomRow) {
+function parseState(row: RealmRoomRow) {
   if (!row.stateJson) return null;
   try {
-    const state = upgradeGameState(JSON.parse(row.stateJson));
+    const state = upgradeRealmGameState(JSON.parse(row.stateJson));
     if (!state) throw new Error("Unreadable state");
     return state;
   } catch {
-    throw new OnlineRoomError("This circle can no longer be read.", 500);
+    throw new RealmRoomError("This atlas can no longer be read.", 500);
   }
 }
 
 async function findRoom(roomId: string) {
   await ensureRoomsSchema();
   const id = normalizeRoomId(roomId);
-  if (id.length !== 6) throw new OnlineRoomError("That room code is not valid.", 400);
+  if (id.length !== 6) throw new RealmRoomError("That room code is not valid.", 400);
   const db = await getRoomsDb();
   const row = await db
     .prepare(`SELECT
@@ -84,27 +86,27 @@ async function findRoom(roomId: string) {
       created_at AS createdAt,
       updated_at AS updatedAt,
       expires_at AS expiresAt
-      FROM online_rooms WHERE id = ?`)
+      FROM realm_rooms WHERE id = ?`)
     .bind(id)
-    .first<OnlineRoomRow>();
-  if (!row) throw new OnlineRoomError("That circle could not be found.", 404);
-  if (row.expiresAt <= Date.now()) throw new OnlineRoomError("That invitation has expired.", 410);
+    .first<RealmRoomRow>();
+  if (!row) throw new RealmRoomError("That table could not be found.", 404);
+  if (row.expiresAt <= Date.now()) throw new RealmRoomError("That invitation has expired.", 410);
   return row;
 }
 
-async function identifySeat(row: OnlineRoomRow, token: string): Promise<0 | 1> {
-  if (!token) throw new OnlineRoomError("This invitation is missing its private key.", 401);
+async function identifySeat(row: RealmRoomRow, token: string): Promise<0 | 1> {
+  if (!token) throw new RealmRoomError("This invitation is missing its private key.", 401);
   const hash = await tokenHash(token);
   if (safeEqual(hash, row.hostTokenHash)) return 0;
   if (safeEqual(hash, row.guestTokenHash)) return 1;
-  throw new OnlineRoomError("This invitation is not valid for that circle.", 403);
+  throw new RealmRoomError("This invitation is not valid for that table.", 403);
 }
 
-function viewRoom(row: OnlineRoomRow, seat: 0 | 1): OnlineRoomView {
+function viewRoom(row: RealmRoomRow, seat: 0 | 1): RealmRoomView {
   const game = parseState(row);
   return {
     id: row.id,
-    status: row.status as OnlineRoomStatus,
+    status: row.status as RealmRoomStatus,
     version: row.version,
     seat,
     hostName: row.hostName,
@@ -112,48 +114,46 @@ function viewRoom(row: OnlineRoomRow, seat: 0 | 1): OnlineRoomView {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     expiresAt: row.expiresAt,
-    game: game ? createOnlineGameView(game, seat) : null,
+    game: game ? createRealmOnlineGameView(game) : null,
   };
 }
 
-export function bearerToken(request: Request) {
+export function realmBearerToken(request: Request) {
   const value = request.headers.get("authorization") ?? "";
   return value.startsWith("Bearer ") ? value.slice(7).trim() : "";
 }
 
-function isOnlineAction(value: unknown): value is OnlineAction {
+function isRealmAction(value: unknown): value is RealmOnlineAction {
   if (!value || typeof value !== "object") return false;
   const action = value as Record<string, unknown>;
-  if (!Number.isInteger(action.version)) return false;
+  if (!Number.isInteger(action.version) || typeof action.type !== "string") return false;
   if (action.type === "rematch") return true;
-  if (action.type === "bank") {
-    return Array.isArray(action.cardIds)
-      && action.cardIds.length >= 2
-      && action.cardIds.length <= 4
-      && action.cardIds.every((cardId) => typeof cardId === "string");
-  }
-  return action.type === "inquire"
+  return action.type === "shoot"
     && typeof action.targetId === "string"
-    && typeof action.identityId === "string";
+    && typeof action.power === "number"
+    && Number.isFinite(action.power)
+    && action.power >= 0
+    && action.power <= 1
+    && typeof action.accuracy === "number"
+    && Number.isFinite(action.accuracy)
+    && action.accuracy >= 0
+    && action.accuracy <= 1;
 }
 
-export async function createOnlineRoom(request: Request, requestedName: unknown) {
+export async function createRealmRoom(request: Request, requestedName: unknown) {
   await ensureRoomsSchema();
   const db = await getRoomsDb();
-  const hostName = cleanName(requestedName, "Seeker One");
+  const hostName = cleanName(requestedName, "Ruler One");
   const hostToken = randomToken();
   const guestToken = randomToken();
-  const [hostTokenHash, guestTokenHash] = await Promise.all([
-    tokenHash(hostToken),
-    tokenHash(guestToken),
-  ]);
+  const [hostTokenHash, guestTokenHash] = await Promise.all([tokenHash(hostToken), tokenHash(guestToken)]);
   const now = Date.now();
   let roomId = "";
 
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const candidate = randomRoomId();
     const result = await db
-      .prepare(`INSERT OR IGNORE INTO online_rooms (
+      .prepare(`INSERT OR IGNORE INTO realm_rooms (
         id, host_name, guest_name, host_token_hash, guest_token_hash, status,
         state_json, version, created_at, updated_at, expires_at
       ) VALUES (?, ?, NULL, ?, ?, 'waiting', NULL, 0, ?, ?, ?)`)
@@ -164,106 +164,95 @@ export async function createOnlineRoom(request: Request, requestedName: unknown)
       break;
     }
   }
-  if (!roomId) throw new OnlineRoomError("The Veil could not open a new circle. Try again.", 503);
+  if (!roomId) throw new RealmRoomError("The atlas could not open a new table. Try again.", 503);
 
   const row = await findRoom(roomId);
   const invite = new URL(request.url);
-  invite.pathname = "/veilbound";
+  invite.pathname = "/realm-roll";
   invite.search = "";
-  invite.searchParams.set("room", roomId);
-  invite.searchParams.set("key", guestToken);
-
+  invite.searchParams.set("realmRoom", roomId);
+  invite.searchParams.set("realmKey", guestToken);
   return {
     room: viewRoom(row, 0),
     credentials: { roomId, token: hostToken, inviteUrl: invite.toString() },
   };
 }
 
-export async function joinOnlineRoom(roomId: string, token: string, requestedName: unknown) {
+export async function joinRealmRoom(roomId: string, token: string, requestedName: unknown) {
   const row = await findRoom(roomId);
   const seat = await identifySeat(row, token);
-  if (seat !== 1) throw new OnlineRoomError("Only the invited seeker can take this seat.", 403);
-
+  if (seat !== 1) throw new RealmRoomError("Only the invited ruler can take this seat.", 403);
   if (row.status === "waiting") {
-    const guestName = cleanName(requestedName, "Seeker Two");
-    const game = createGame(
+    const guestName = cleanName(requestedName, "Ruler Two");
+    const game = createRealmGame(
       [
         { name: row.hostName, kind: "human" },
         { name: guestName, kind: "human" },
       ],
-      { mode: "online", difficulty: "seer" },
+      { mode: "online", difficulty: "royal" },
     );
     const now = Date.now();
     const db = await getRoomsDb();
     const update = await db
-      .prepare(`UPDATE online_rooms
+      .prepare(`UPDATE realm_rooms
         SET guest_name = ?, status = 'active', state_json = ?, version = version + 1, updated_at = ?
         WHERE id = ? AND status = 'waiting' AND version = ?`)
       .bind(guestName, JSON.stringify(game), now, row.id, row.version)
       .run();
-    if ((update.meta.changes ?? 0) === 0) {
-      return getOnlineRoom(roomId, token);
-    }
+    if ((update.meta.changes ?? 0) === 0) return getRealmRoom(roomId, token);
   }
-  return getOnlineRoom(roomId, token);
+  return getRealmRoom(roomId, token);
 }
 
-export async function getOnlineRoom(roomId: string, token: string) {
+export async function getRealmRoom(roomId: string, token: string) {
   const row = await findRoom(roomId);
   const seat = await identifySeat(row, token);
   if (seat === 1 && row.status === "waiting") {
-    throw new OnlineRoomError("Take your seat to enter this circle.", 409);
+    throw new RealmRoomError("Take your seat to open this atlas.", 409);
   }
   return viewRoom(row, seat);
 }
 
-export async function applyOnlineAction(roomId: string, token: string, action: unknown) {
-  if (!isOnlineAction(action)) throw new OnlineRoomError("That action is not valid.", 400);
+function applyAction(current: RealmGameState, seat: 0 | 1, action: RealmOnlineAction) {
+  if (action.type === "rematch") {
+    if (current.status !== "complete") throw new RealmRoomError("The current atlas is not complete.", 409);
+    return createRealmGame(
+      current.players.map((player) => ({ name: player.name, kind: "human" as const })),
+      { mode: "online", difficulty: "royal" },
+    );
+  }
+  if (current.status !== "active") throw new RealmRoomError("This atlas is already complete.", 409);
+  if (current.currentPlayer !== seat) throw new RealmRoomError("Wait for the other ruler's turn.", 409);
+  const actorId = current.players[seat].id;
+  return resolveRealmShot(current, {
+    actorId,
+    targetId: action.targetId,
+    power: action.power,
+    accuracy: action.accuracy,
+  });
+}
+
+export async function applyRealmRoomAction(roomId: string, token: string, action: unknown) {
+  if (!isRealmAction(action)) throw new RealmRoomError("That move is not valid.", 400);
   const row = await findRoom(roomId);
   const seat = await identifySeat(row, token);
-  if (!Number.isInteger(action.version) || action.version !== row.version) {
-    throw new OnlineRoomError("The circle changed. Refreshing the latest turn.", 409);
-  }
+  if (action.version !== row.version) throw new RealmRoomError("The table changed. Refreshing the latest turn.", 409);
   const current = parseState(row);
-  if (!current) throw new OnlineRoomError("The second seeker has not joined yet.", 409);
-
-  let next: GameState;
-  if (action.type === "rematch") {
-    if (current.status !== "complete") throw new OnlineRoomError("The current rite is not complete.", 409);
-    next = createGame(
-      current.players.map((player) => ({ name: player.name, kind: "human" as const })),
-      { mode: "online", difficulty: "seer" },
-    );
-  } else if (action.type === "inquire") {
-    if (current.status !== "active") throw new OnlineRoomError("This rite has already ended.", 409);
-    if (current.currentPlayer !== seat) throw new OnlineRoomError("Wait for the other seeker’s turn.", 409);
-    next = resolveInquiry(current, {
-      actorId: current.players[seat].id,
-      targetId: action.targetId,
-      identityId: action.identityId,
-    });
-    if (next === current) throw new OnlineRoomError("That inquiry is not legal.", 400);
-  } else {
-    if (current.status !== "active") throw new OnlineRoomError("This rite has already ended.", 409);
-    if (current.currentPlayer !== seat) throw new OnlineRoomError("Wait for the other seeker’s turn.", 409);
-    next = resolveBank(current, {
-      actorId: current.players[seat].id,
-      cardIds: action.cardIds,
-    });
-    if (next === current) throw new OnlineRoomError("Those cards cannot be locked together.", 400);
-  }
+  if (!current) throw new RealmRoomError("The second ruler has not joined yet.", 409);
+  const next = applyAction(current, seat, action);
+  if (next === current) throw new RealmRoomError("That move is not legal right now.", 400);
 
   const now = Date.now();
-  const status: OnlineRoomStatus = next.status === "complete" ? "complete" : "active";
+  const status: RealmRoomStatus = next.status === "complete" ? "complete" : "active";
   const db = await getRoomsDb();
   const update = await db
-    .prepare(`UPDATE online_rooms
+    .prepare(`UPDATE realm_rooms
       SET status = ?, state_json = ?, version = version + 1, updated_at = ?
       WHERE id = ? AND version = ?`)
     .bind(status, JSON.stringify(next), now, row.id, row.version)
     .run();
   if ((update.meta.changes ?? 0) === 0) {
-    throw new OnlineRoomError("The other seeker moved first. Refreshing the circle.", 409);
+    throw new RealmRoomError("The other ruler moved first. Refreshing the table.", 409);
   }
-  return getOnlineRoom(roomId, token);
+  return getRealmRoom(roomId, token);
 }
