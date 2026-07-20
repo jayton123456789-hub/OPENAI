@@ -20,11 +20,19 @@ Every card is an Echo belonging to one of thirteen masked identities. A seeker m
 
 ### Solo Inquiry
 
-- One human and one AI rival
+- One human with a choice of one or two AI rivals
 - Novice: random but legal inquiries
 - Adept: prioritizes near-complete identities and remembers public questions
 - Seer: evaluates public request history, denials, and its own matching strength
-- AI never reads hidden hands
+- AI uses only its own hand and public table history; it never reads hidden hands
+
+### Private Invitation
+
+- Two human players on two separate phones, tablets, or computers
+- The host creates one private invitation and sends its link through a MaskLife message, text, or private chat
+- No account is required; possession of the private link claims the second seat
+- The service validates turns, keeps both devices synchronized, and never sends the opponent's cards or the remaining deck to either browser
+- A device can reconnect to its current seat after a refresh
 
 ### Shared Circle
 
@@ -32,6 +40,13 @@ Every card is an Echo belonging to one of thirteen masked identities. A seeker m
 - Private full-screen handoff between turns
 - Custom player names
 - One-device offline play
+
+## Guided play and interaction
+
+- Seven-step tutorial covers the objective, card anatomy, inquiries, successful transfers, “Draw from the Veil,” binding, scoring, privacy, and every play mode.
+- The card-selection step is interactive. Players can tap a card or drag it into the inquiry seal.
+- Pointer gestures use capture-based movement so mouse, pen, and touch all share the same rules.
+- Reduced-motion settings preserve gameplay while removing nonessential movement.
 
 ## Identity deck
 
@@ -44,5 +59,6 @@ Every identity includes Memory, Desire, Fear, and Truth.
 - The words “Go Fish” never appear in player-facing copy.
 - “Draw from the Veil” is immutable terminology.
 - No purchases, gambling language, ads, or pay-to-win systems.
-- Saved state and stats remain local in First Edition.
+- Local matches, preferences, and chronicle stats remain on the device.
+- Private online rooms are server-authoritative, expire after seven days, and store only hashed seat keys.
 - All companion games must preserve the same readability, privacy, accessibility, and offline-first baseline.

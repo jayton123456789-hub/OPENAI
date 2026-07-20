@@ -19,7 +19,7 @@ export const ECHOES = ["Memory", "Desire", "Fear", "Truth"] as const;
 export type IdentityId = (typeof IDENTITIES)[number]["id"];
 export type EchoName = (typeof ECHOES)[number];
 export type Difficulty = "novice" | "adept" | "seer";
-export type GameMode = "solo" | "local";
+export type GameMode = "solo" | "local" | "online";
 export type PlayerKind = "human" | "ai";
 
 export interface VeilCard {
@@ -355,6 +355,33 @@ function choose<T>(items: T[], random: () => number) {
   return items[Math.floor(random() * items.length)];
 }
 
+function publicHoldingConfidence(
+  state: GameState,
+  playerId: string,
+  identityId: IdentityId,
+) {
+  let confidence = 0;
+  for (const event of [...state.events].reverse()) {
+    if (event.identityId !== identityId) continue;
+    const text = event.text.toLowerCase();
+
+    // Asking publicly proves the seeker held at least one matching echo then.
+    if (event.actorId === playerId && text.includes("do you hold")) confidence = 3;
+    // A reveal transfers every matching echo to the requester.
+    if (event.targetId === playerId && event.success === true && text.includes("reveal")) {
+      confidence = Math.max(confidence, 8);
+    }
+    // A denial publicly proves that the answering seeker had none at that moment.
+    if (event.actorId === playerId && event.success === false && text.includes("draw from the veil")) {
+      confidence = -12;
+    }
+    if (event.actorId === playerId && text.includes("veil answers")) confidence = 8;
+    // Bound identities leave the hand and cannot be requested from that seeker.
+    if (event.actorId === playerId && text.includes(" bound ")) confidence = -20;
+  }
+  return confidence;
+}
+
 export function chooseAIInquiry(state: GameState): InquiryChoice | null {
   const actor = state.players[state.currentPlayer];
   if (!actor || actor.kind !== "ai" || actor.hand.length === 0) return null;
@@ -365,63 +392,40 @@ export function chooseAIInquiry(state: GameState): InquiryChoice | null {
   );
   if (identities.length === 0 || targets.length === 0) return null;
 
-  let identityId = choose(identities, random);
-  let target = choose(targets, random);
-
-  if (state.difficulty !== "novice") {
-    const counts = identities
-      .map((id) => ({
-        id,
-        count: actor.hand.filter((card) => card.identityId === id).length,
-      }))
-      .sort((a, b) => b.count - a.count);
-    const bestCount = counts[0]?.count ?? 1;
-    identityId = choose(
-      counts.filter((item) => item.count === bestCount).map((item) => item.id),
-      random,
-    );
-
-    const remembered = state.events.find(
-      (event) =>
-        event.actorId !== actor.id &&
-        event.identityId &&
-        identities.includes(event.identityId) &&
-        targets.some((candidate) => candidate.id === event.actorId),
-    );
-    if (remembered?.identityId) {
-      identityId = remembered.identityId;
-      target = targets.find((candidate) => candidate.id === remembered.actorId) ?? target;
-    }
+  if (state.difficulty === "novice") {
+    return {
+      actorId: actor.id,
+      targetId: choose(targets, random).id,
+      identityId: choose(identities, random),
+    };
   }
 
-  if (state.difficulty === "seer") {
-    const scored = targets.flatMap((candidate) =>
-      identities.map((id) => {
-        const rememberedRequests = state.events.filter(
-          (event) => event.actorId === candidate.id && event.identityId === id,
-        ).length;
-        const deniedByTarget = state.events.filter(
-          (event) =>
-            event.targetId === candidate.id &&
-            event.identityId === id &&
-            event.success === false,
-        ).length;
-        const ownCount = actor.hand.filter((card) => card.identityId === id).length;
-        return {
-          target: candidate,
-          identityId: id,
-          score: rememberedRequests * 4 + ownCount * 2 - deniedByTarget * 3 + random(),
-        };
-      }),
-    );
-    const strongest = scored.sort((a, b) => b.score - a.score)[0];
-    if (strongest) {
-      target = strongest.target;
-      identityId = strongest.identityId;
-    }
-  }
-
-  return { actorId: actor.id, targetId: target.id, identityId };
+  const candidates = targets.flatMap((target) =>
+    identities.map((identityId) => {
+      const ownCount = actor.hand.filter((card) => card.identityId === identityId).length;
+      const memory = publicHoldingConfidence(state, target.id, identityId);
+      const completionPressure = ownCount === 3 ? 9 : ownCount === 2 ? 4 : 0;
+      const targetReach = Math.min(target.hand.length, 7) * 0.12;
+      const memoryWeight = state.difficulty === "seer" ? 2.2 : 1.2;
+      return {
+        target,
+        identityId,
+        score:
+          ownCount * (state.difficulty === "seer" ? 4 : 2.8) +
+          completionPressure +
+          memory * memoryWeight +
+          targetReach +
+          random(),
+      };
+    }),
+  );
+  const strongest = candidates.sort((a, b) => b.score - a.score)[0];
+  if (!strongest) return null;
+  return {
+    actorId: actor.id,
+    targetId: strongest.target.id,
+    identityId: strongest.identityId,
+  };
 }
 
 export function sortHand(cards: VeilCard[]) {

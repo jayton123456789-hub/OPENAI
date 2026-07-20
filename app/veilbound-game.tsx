@@ -14,12 +14,20 @@ import {
   validInquiryIdentities,
   VeilCard,
 } from "@/lib/veilbound";
+import type {
+  OnlineAction,
+  OnlineCredentials,
+  OnlineGameView,
+  OnlineRoomView,
+} from "@/lib/online-room";
 
 type Screen =
   | "title"
   | "modes"
   | "solo-setup"
   | "local-setup"
+  | "online-setup"
+  | "tutorial"
   | "chronicle"
   | "settings"
   | "game";
@@ -42,6 +50,7 @@ interface Chronicle {
 const SAVE_KEY = "veilbound-save-v1";
 const SETTINGS_KEY = "veilbound-settings-v1";
 const STATS_KEY = "veilbound-chronicle-v1";
+const ONLINE_KEY = "veilbound-online-room-v1";
 
 const DEFAULT_SETTINGS: UserSettings = {
   sound: true,
@@ -58,6 +67,17 @@ const DEFAULT_STATS: Chronicle = {
 };
 
 const AI_NAMES = ["The Curator", "The Pale Seer", "The Archivist"];
+
+interface PendingInvite {
+  roomId: string;
+  token: string;
+}
+
+async function responseJson<T>(response: Response): Promise<T> {
+  const payload = (await response.json()) as T & { error?: string };
+  if (!response.ok) throw new Error(payload.error || "The Veil did not answer.");
+  return payload;
+}
 
 function tone(enabled: boolean, kind: "tap" | "reveal" | "bind" | "deny") {
   if (!enabled || typeof window === "undefined") return;
@@ -134,13 +154,30 @@ function VeilCardView({
   selected,
   compact,
   onClick,
+  onPointerDrop,
+  onPointerDragChange,
+  dropSelector = ".inquiryBar",
 }: {
   card: VeilCard;
   selected?: boolean;
   compact?: boolean;
   onClick?: () => void;
+  onPointerDrop?: () => void;
+  onPointerDragChange?: (dragging: boolean) => void;
+  dropSelector?: string;
 }) {
   const identity = getIdentity(card.identityId);
+  const pointerStart = useRef<{ x: number; y: number } | null>(null);
+  const pointerDragged = useRef(false);
+  const [pointerDragging, setPointerDragging] = useState(false);
+
+  const resetPointerCard = (element: HTMLButtonElement) => {
+    pointerStart.current = null;
+    setPointerDragging(false);
+    onPointerDragChange?.(false);
+    element.style.removeProperty("--drag-x");
+    element.style.removeProperty("--drag-y");
+  };
   const content = (
     <>
       <span className="cardCorner"><b>{identity.sigil}</b><i>◆</i></span>
@@ -159,9 +196,40 @@ function VeilCardView({
   }
   return (
     <button
-      className={`veilCard selectable ${selected ? "selected" : ""} ${compact ? "compact" : ""}`}
+      className={`veilCard selectable ${selected ? "selected" : ""} ${compact ? "compact" : ""} ${onPointerDrop ? "pointerDraggable" : ""} ${pointerDragging ? "pointerDragging" : ""}`}
       type="button"
-      onClick={onClick}
+      onClick={() => {
+        if (pointerDragged.current) {
+          pointerDragged.current = false;
+          return;
+        }
+        onClick();
+      }}
+      onPointerDown={(event) => {
+        if (!onPointerDrop) return;
+        pointerStart.current = { x: event.clientX, y: event.clientY };
+        pointerDragged.current = false;
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        if (!pointerStart.current || !onPointerDrop) return;
+        const x = event.clientX - pointerStart.current.x;
+        const y = event.clientY - pointerStart.current.y;
+        if (Math.hypot(x, y) < 9 && !pointerDragging) return;
+        pointerDragged.current = true;
+        setPointerDragging(true);
+        onPointerDragChange?.(true);
+        event.currentTarget.style.setProperty("--drag-x", `${x}px`);
+        event.currentTarget.style.setProperty("--drag-y", `${y}px`);
+      }}
+      onPointerUp={(event) => {
+        if (!pointerStart.current || !onPointerDrop) return;
+        const dropTarget = document.elementFromPoint(event.clientX, event.clientY)?.closest(dropSelector);
+        if (pointerDragged.current && dropTarget) onPointerDrop();
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        resetPointerCard(event.currentTarget);
+      }}
+      onPointerCancel={(event) => resetPointerCard(event.currentTarget)}
       aria-pressed={selected}
       aria-label={`Choose ${identity.name}, ${card.echo}`}
     >
@@ -180,7 +248,7 @@ function CardBack({ count, small = false }: { count?: number; small?: boolean })
   );
 }
 
-function RulesPanel({ close }: { close: () => void }) {
+function RulesPanel({ close, tutorial }: { close: () => void; tutorial: () => void }) {
   return (
     <div className="modalScrim" role="dialog" aria-modal="true" aria-labelledby="rules-title">
       <section className="modalPanel rulesPanel">
@@ -195,7 +263,8 @@ function RulesPanel({ close }: { close: () => void }) {
           <li><b>Bind four echoes</b><span>Memory, Desire, Fear, and Truth complete an identity. Bound identities are safe and score one point.</span></li>
           <li><b>Claim the revelation</b><span>When all thirteen identities are bound, the seeker with the most wins.</span></li>
         </ol>
-        <button className="primaryButton" type="button" onClick={close}>I understand</button>
+        <button className="primaryButton" type="button" onClick={tutorial}>Open the guided tutorial</button>
+        <button className="ghostButton" type="button" onClick={close}>I understand</button>
       </section>
     </div>
   );
@@ -269,6 +338,7 @@ function TitleScreen({
   onContinue,
   onPlay,
   onRules,
+  onTutorial,
   onChronicle,
   onSettings,
 }: {
@@ -276,6 +346,7 @@ function TitleScreen({
   onContinue: () => void;
   onPlay: () => void;
   onRules: () => void;
+  onTutorial: () => void;
   onChronicle: () => void;
   onSettings: () => void;
 }) {
@@ -302,20 +373,36 @@ function TitleScreen({
         <button className={canContinue ? "secondaryButton" : "primaryButton"} type="button" onClick={onPlay}>
           Begin a new game
         </button>
+        <button className="secondaryButton" type="button" onClick={onTutorial}>Learn to play</button>
         <button className="ghostButton" type="button" onClick={onChronicle}>Open the chronicle</button>
       </div>
-      <p className="versionStamp">First Edition · 1.0</p>
+      <p className="versionStamp">First Edition · 1.1</p>
     </section>
   );
 }
 
-function ModesScreen({ back, solo, local }: { back: () => void; solo: () => void; local: () => void }) {
+function ModesScreen({
+  back,
+  solo,
+  online,
+  local,
+}: {
+  back: () => void;
+  solo: () => void;
+  online: () => void;
+  local: () => void;
+}) {
   return (
     <AppPage eyebrow="Choose your circle" title="Ways to play" back={back}>
       <div className="modeGrid">
         <button className="modeCard featured" type="button" onClick={solo}>
           <span className="modeArt soloArt" aria-hidden="true"><i /><b /></span>
-          <span className="modeCopy"><small>One seeker · One keeper</small><strong>Solo inquiry</strong><em>Outwit a masked opponent who remembers your questions.</em></span>
+          <span className="modeCopy"><small>One seeker · One or two keepers</small><strong>Solo inquiry</strong><em>Test your strategy against one masked rival or a full three-seat circle.</em></span>
+          <span className="modeArrow">→</span>
+        </button>
+        <button className="modeCard onlineMode" type="button" onClick={online}>
+          <span className="modeArt onlineArt" aria-hidden="true"><i /><b /><em>↗</em></span>
+          <span className="modeCopy"><small>Two seekers · Two devices</small><strong>Private invitation</strong><em>Create a private link and send it through a MaskLife message or any chat.</em></span>
           <span className="modeArrow">→</span>
         </button>
         <button className="modeCard" type="button" onClick={local}>
@@ -324,23 +411,39 @@ function ModesScreen({ back, solo, local }: { back: () => void; solo: () => void
           <span className="modeArrow">→</span>
         </button>
       </div>
-      <p className="finePrint">Both modes work completely offline and save after every turn.</p>
+      <p className="finePrint">Solo and Shared Circle work offline. Private invitations save every turn securely online.</p>
     </AppPage>
   );
 }
 
-function SoloSetup({ back, start }: { back: () => void; start: (difficulty: Difficulty) => void }) {
+function SoloSetup({
+  back,
+  start,
+}: {
+  back: () => void;
+  start: (difficulty: Difficulty, botCount: 1 | 2) => void;
+}) {
   const [difficulty, setDifficulty] = useState<Difficulty>("adept");
+  const [botCount, setBotCount] = useState<1 | 2>(1);
   const choices: { id: Difficulty; name: string; note: string }[] = [
     { id: "novice", name: "Novice", note: "Curious, forgetful, forgiving" },
     { id: "adept", name: "Adept", note: "Observant and balanced" },
     { id: "seer", name: "Seer", note: "Patient, watchful, relentless" },
   ];
   return (
-    <AppPage eyebrow="Solo inquiry" title="Choose your rival" back={back}>
+    <AppPage eyebrow="Solo inquiry" title="Choose your rivals" back={back}>
       <div className="rivalPortrait"><IdentityPortrait identityId="oracle" /><span className="rivalHalo" /></div>
-      <h2 className="rivalName">The Curator</h2>
+      <h2 className="rivalName">{botCount === 1 ? "The Curator" : "The Curator & The Pale Seer"}</h2>
       <p className="rivalQuote">“Ask carefully. Every question leaves a trace.”</p>
+      <p className="setupLabel">Masked rivals</p>
+      <div className="playerCount botCount" aria-label="Number of computer-controlled rivals">
+        {([1, 2] as const).map((value) => (
+          <button key={value} type="button" className={botCount === value ? "active" : ""} onClick={() => setBotCount(value)}>
+            {value} {value === 1 ? "bot" : "bots"}
+          </button>
+        ))}
+      </div>
+      <p className="setupLabel">Difficulty</p>
       <div className="segmented" aria-label="Difficulty">
         {choices.map((choice) => (
           <button key={choice.id} type="button" className={difficulty === choice.id ? "active" : ""} onClick={() => setDifficulty(choice.id)}>
@@ -348,7 +451,112 @@ function SoloSetup({ back, start }: { back: () => void; start: (difficulty: Diff
           </button>
         ))}
       </div>
-      <button className="primaryButton setupStart" type="button" onClick={() => start(difficulty)}>Enter the circle</button>
+      <button className="primaryButton setupStart" type="button" onClick={() => start(difficulty, botCount)}>Enter the circle</button>
+    </AppPage>
+  );
+}
+
+const TUTORIAL_CARD: VeilCard = {
+  id: "tutorial-warden-memory",
+  identityId: "warden",
+  echo: "Memory",
+};
+
+const TUTORIAL_STEPS = [
+  {
+    eyebrow: "The objective",
+    title: "Bind hidden identities",
+    body: "The deck holds thirteen masked identities. Every identity has four Echoes—Memory, Desire, Fear, and Truth. Gather all four to bind that identity for one point.",
+  },
+  {
+    eyebrow: "Read your hand",
+    title: "Identity first, Echo second",
+    body: "The portrait and title tell you which identity a card belongs to. The small label names its Echo. You may ask only for an identity already represented in your hand.",
+  },
+  {
+    eyebrow: "Try the gesture",
+    title: "Prepare an inquiry",
+    body: "Tap The Warden—or drag the card into the inquiry seal. In a match, choose a rival and press Inquire. Tapping always remains available for phones and accessibility.",
+  },
+  {
+    eyebrow: "When they reveal",
+    title: "Take every matching Echo",
+    body: "If your rival holds The Warden, every Warden Echo in their hand passes to you. A successful inquiry lets you ask again, so use public clues to build a streak.",
+  },
+  {
+    eyebrow: "When they deny",
+    title: "Draw from the Veil",
+    body: "If they hold none, they answer “Draw from the Veil.” You draw one card and the turn usually passes. Draw the exact identity you requested and you earn another inquiry.",
+  },
+  {
+    eyebrow: "Binding and scoring",
+    title: "Four Echoes become one point",
+    body: "Complete identities bind automatically and leave your hand. Empty hands refill while cards remain. When all thirteen identities are bound, the highest score wins; equal scores share the revelation.",
+  },
+  {
+    eyebrow: "Choose your circle",
+    title: "Three complete ways to play",
+    body: "Train against one or two fair bots, pass one device among two to four people, or send a private invitation for a protected two-device match. Only your own online hand is ever sent to your screen.",
+  },
+] as const;
+
+function TutorialScreen({ back, practice }: { back: () => void; practice: () => void }) {
+  const [step, setStep] = useState(0);
+  const [prepared, setPrepared] = useState(false);
+  const item = TUTORIAL_STEPS[step];
+  const isGesture = step === 2;
+  const last = step === TUTORIAL_STEPS.length - 1;
+
+  const prepareCard = () => setPrepared(true);
+
+  return (
+    <AppPage eyebrow="Guided rite" title="Learn Veilbound" back={back}>
+      <div className="tutorialProgress" aria-label={`Tutorial step ${step + 1} of ${TUTORIAL_STEPS.length}`}>
+        {TUTORIAL_STEPS.map((_, index) => <i key={index} className={index <= step ? "active" : ""} />)}
+      </div>
+      <section className="tutorialCard">
+        <p className="eyebrow">{item.eyebrow}</p>
+        <h2>{item.title}</h2>
+        <p>{item.body}</p>
+        <div className={`tutorialStage stage${step + 1}`}>
+          {step === 0 && <div className="echoSet"><span>Memory</span><span>Desire</span><span>Fear</span><span>Truth</span></div>}
+          {step === 1 && <VeilCardView card={TUTORIAL_CARD} />}
+          {isGesture && (
+            <>
+              <VeilCardView
+                card={TUTORIAL_CARD}
+                selected={prepared}
+                onClick={prepareCard}
+                onPointerDrop={prepareCard}
+                dropSelector=".tutorialDrop"
+              />
+              <div
+                className={`tutorialDrop ${prepared ? "prepared" : ""}`}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => { event.preventDefault(); prepareCard(); }}
+              >
+                <Crest small />
+                <span>{prepared ? "The Warden is prepared" : "Drop The Warden here"}</span>
+              </div>
+            </>
+          )}
+          {step === 3 && <div className="tutorialTransfer"><span>1</span><b>→</b><span>3 Echoes</span></div>}
+          {step === 4 && <div className="tutorialPhrase">“Draw from the Veil.”</div>}
+          {step === 5 && <div className="tutorialScore"><Crest small /><strong>+1</strong><span>The Warden bound</span></div>}
+          {step === 6 && <div className="tutorialModes"><span>1–2 bots</span><span>Pass & play</span><span>Private link</span></div>}
+        </div>
+        {isGesture && <p className="tutorialHint" aria-live="polite">{prepared ? "Perfect. The identity is selected and ready to inquire after." : "Try tapping or dragging the card."}</p>}
+      </section>
+      <div className="tutorialActions">
+        {step > 0 && <button className="secondaryButton" type="button" onClick={() => setStep((value) => value - 1)}>Previous</button>}
+        {!last && (
+          <button className="primaryButton" type="button" disabled={isGesture && !prepared} onClick={() => setStep((value) => value + 1)}>
+            Continue
+          </button>
+        )}
+        {last && <button className="primaryButton" type="button" onClick={practice}>Practice against a Novice</button>}
+      </div>
+      <p className="finePrint">Step {step + 1} of {TUTORIAL_STEPS.length} · You can reopen this guide from Rules at any time.</p>
     </AppPage>
   );
 }
@@ -382,6 +590,106 @@ function LocalSetup({ back, start }: { back: () => void; start: (names: string[]
   );
 }
 
+function OnlineLobby({
+  invite,
+  credentials,
+  room,
+  busy,
+  error,
+  create,
+  join,
+  leave,
+  back,
+}: {
+  invite: PendingInvite | null;
+  credentials: OnlineCredentials | null;
+  room: OnlineRoomView | null;
+  busy: boolean;
+  error: string;
+  create: (name: string) => void;
+  join: (name: string) => void;
+  leave: () => void;
+  back: () => void;
+}) {
+  const [name, setName] = useState(invite ? "Seeker Two" : "You");
+  const [shareState, setShareState] = useState("Send private invitation");
+  const waiting = room?.status === "waiting" && credentials?.inviteUrl;
+
+  const share = async () => {
+    if (!credentials?.inviteUrl) return;
+    const shareData = {
+      title: "Join my Veilbound circle",
+      text: "I opened a private Veilbound circle for us. Take the second seat:",
+      url: credentials.inviteUrl,
+    };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        setShareState("Invitation sent");
+      } else {
+        await navigator.clipboard.writeText(credentials.inviteUrl);
+        setShareState("Link copied—paste it into your message");
+      }
+    } catch (shareError) {
+      if (shareError instanceof Error && shareError.name === "AbortError") return;
+      try {
+        await navigator.clipboard.writeText(credentials.inviteUrl);
+        setShareState("Link copied—paste it into your message");
+      } catch {
+        setShareState("Press and hold the link below to copy it");
+      }
+    }
+  };
+
+  if (credentials && !room) {
+    return (
+      <AppPage eyebrow="Private invitation" title="Finding your circle" back={back}>
+        <div className="waitingSeal compactWaiting"><Crest /><span className="waitingPulse" /></div>
+        <p className="lobbyCopy">The Veil is reconnecting this device to room {credentials.roomId}.</p>
+        {error && <div className="onlineError" role="alert">{error}</div>}
+        {error && <button className="dangerButton" type="button" onClick={leave}>Forget this room</button>}
+      </AppPage>
+    );
+  }
+
+  if (waiting) {
+    return (
+      <AppPage eyebrow="Private invitation" title="Waiting at the Veil" back={back}>
+        <div className="waitingSeal"><Crest /><span className="waitingPulse" /><strong>{room.id}</strong><small>private room code</small></div>
+        <h2 className="lobbyTitle">Your second seeker has been invited</h2>
+        <p className="lobbyCopy">Send the link through a MaskLife message, text, or any private chat. The match begins automatically when they take their seat.</p>
+        <button className="primaryButton shareInvite" type="button" onClick={share}>{shareState}</button>
+        <div className="inviteLink" tabIndex={0}>{credentials.inviteUrl}</div>
+        <div className="privacyNote"><Crest small /><span><b>Private by possession</b><small>Anyone with this link can take the second seat. Send it only to the person you want to play.</small></span></div>
+        <button className="dangerButton" type="button" onClick={leave}>Leave this invitation</button>
+      </AppPage>
+    );
+  }
+
+  const joining = Boolean(invite);
+  return (
+    <AppPage eyebrow={joining ? "You were invited" : "Two devices · One circle"} title={joining ? "Take the second seat" : "Open a private circle"} back={back}>
+      <div className="onlineHero"><span className="onlineDevice"><i /></span><b>↔</b><span className="onlineDevice"><i /></span></div>
+      <p className="lobbyCopy">
+        {joining
+          ? `Room ${invite?.roomId} is waiting. Choose the name your partner will see.`
+          : "Create a protected room, then send one private link. Each player sees only their own hand, and every turn stays synchronized."}
+      </p>
+      <div className="nameFields onlineName">
+        <label>
+          <span>Your name at the table</span>
+          <input value={name} maxLength={18} onChange={(event) => setName(event.target.value)} autoComplete="nickname" />
+        </label>
+      </div>
+      {error && <div className="onlineError" role="alert">{error}</div>}
+      <button className="primaryButton setupStart" type="button" disabled={busy || !name.trim()} onClick={() => joining ? join(name) : create(name)}>
+        {busy ? "Parting the Veil…" : joining ? "Join the circle" : "Create invitation"}
+      </button>
+      <div className="privacyNote"><Crest small /><span><b>No account required</b><small>The private link is the key. Your opponent’s cards never leave the protected game service.</small></span></div>
+    </AppPage>
+  );
+}
+
 function ChronicleScreen({ stats, back }: { stats: Chronicle; back: () => void }) {
   const winRate = stats.games ? Math.round((stats.wins / stats.games) * 100) : 0;
   return (
@@ -406,7 +714,13 @@ function OpponentMedallion({
   selectable,
   onClick,
 }: {
-  player: GameState["players"][number];
+  player: {
+    id: string;
+    name: string;
+    hand?: VeilCard[];
+    handCount?: number;
+    bound: IdentityId[];
+  };
   active: boolean;
   target: boolean;
   selectable: boolean;
@@ -423,14 +737,14 @@ function OpponentMedallion({
     >
       <span className="medallion"><IdentityPortrait identityId={portraitId} /></span>
       <strong>{player.name}</strong>
-      <span className="opponentCounts"><i>{player.hand.length} cards</i><i>{player.bound.length} bound</i></span>
+      <span className="opponentCounts"><i>{player.handCount ?? player.hand?.length ?? 0} cards</i><i>{player.bound.length} bound</i></span>
     </button>
   );
 }
 
-function BoundRow({ player }: { player: GameState["players"][number] }) {
+function BoundRow({ player }: { player: { name: string; bound: IdentityId[] } }) {
   return (
-    <div className="boundRow" aria-label={`${player.name} has ${player.bound.length} bound identities`}>
+    <div className="boundRow" aria-label={`${player.name === "You" ? "You have" : `${player.name} has`} ${player.bound.length} bound identities`}>
       {player.bound.length === 0 ? (
         <span className="emptyBound">No identities bound</span>
       ) : (
@@ -461,12 +775,14 @@ function PauseMenu({
   settings,
   title,
   abandon,
+  abandonLabel = "Abandon this rite",
 }: {
   resume: () => void;
   rules: () => void;
   settings: () => void;
   title: () => void;
   abandon: () => void;
+  abandonLabel?: string;
 }) {
   return (
     <div className="modalScrim" role="dialog" aria-modal="true" aria-labelledby="pause-title">
@@ -478,13 +794,13 @@ function PauseMenu({
         <button className="secondaryButton" type="button" onClick={rules}>Review the rules</button>
         <button className="secondaryButton" type="button" onClick={settings}>Settings</button>
         <button className="ghostButton" type="button" onClick={title}>Save and leave</button>
-        <button className="dangerButton" type="button" onClick={abandon}>Abandon this rite</button>
+        <button className="dangerButton" type="button" onClick={abandon}>{abandonLabel}</button>
       </section>
     </div>
   );
 }
 
-function HistoryPanel({ game, close }: { game: GameState; close: () => void }) {
+function HistoryPanel({ game, close }: { game: Pick<GameState, "events"> | Pick<OnlineGameView, "events">; close: () => void }) {
   return (
     <div className="modalScrim historyScrim" role="dialog" aria-modal="true" aria-labelledby="history-title">
       <section className="modalPanel historyPanel">
@@ -550,12 +866,19 @@ function GameTable({
   openHistory: () => void;
 }) {
   const actor = game.players[game.currentPlayer];
+  const viewer = game.mode === "solo"
+    ? (game.players.find((player) => player.kind === "human") ?? actor)
+    : actor;
   const [selectedIdentity, setSelectedIdentity] = useState<IdentityId | null>(null);
   const [targetId, setTargetId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [draggingIdentity, setDraggingIdentity] = useState<IdentityId | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const validIdentities = useMemo(() => validInquiryIdentities(game, actor.id), [game, actor.id]);
+  const validIdentities = useMemo(() => validInquiryIdentities(game, viewer.id), [game, viewer.id]);
   const targets = game.players.filter((player) => player.id !== actor.id && player.hand.length > 0);
+  const displayedOpponents = game.mode === "solo"
+    ? game.players.filter((player) => player.kind === "ai")
+    : game.players.filter((player) => player.id !== actor.id);
   const effectiveIdentity =
     selectedIdentity && validIdentities.includes(selectedIdentity)
       ? selectedIdentity
@@ -563,7 +886,7 @@ function GameTable({
   const effectiveTarget = targets.some((player) => player.id === targetId)
     ? targetId
     : (targets[0]?.id ?? "");
-  const canAct = actor.kind === "human" && !busy && game.status === "active";
+  const canAct = actor.kind === "human" && actor.id === viewer.id && !busy && game.status === "active";
 
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -589,7 +912,7 @@ function GameTable({
     }, settings.reducedMotion ? 80 : 420);
   };
 
-  const sortedHand = sortHand(actor.hand);
+  const sortedHand = sortHand(viewer.hand);
   const selected = effectiveIdentity ? getIdentity(effectiveIdentity) : null;
 
   return (
@@ -601,12 +924,12 @@ function GameTable({
       </header>
 
       <div className="opponents" data-count={targets.length}>
-        {game.players.filter((player) => player.id !== actor.id).map((player) => (
+        {displayedOpponents.map((player) => (
           <OpponentMedallion
             key={player.id}
             player={player}
             active={game.players[game.currentPlayer].id === player.id}
-            target={effectiveTarget === player.id}
+            target={canAct && effectiveTarget === player.id}
             selectable={canAct && targets.length > 1 && player.hand.length > 0}
             onClick={() => setTargetId(player.id)}
           />
@@ -620,8 +943,8 @@ function GameTable({
 
       <div className="tableCenter">
         <div className="boundSummary">
-          <span>{actor.name}</span>
-          <BoundRow player={actor} />
+          <span>{viewer.name}</span>
+          <BoundRow player={viewer} />
         </div>
         <button className="deckButton" type="button" aria-label={`${game.deck.length} cards remain in the Veil`} disabled>
           <span className="deckHalo" />
@@ -632,27 +955,205 @@ function GameTable({
 
       <div className={`handPanel ${settings.largeCards ? "largeCards" : ""}`}>
         <div className="handHeader">
-          <span><b>{actor.name}&apos;s hand</b><small>{actor.hand.length} echoes</small></span>
-          <span className="scorePill">{actor.bound.length} bound</span>
+          <span><b>{viewer.name === "You" ? "Your hand" : `${viewer.name}’s hand`}</b><small>{viewer.hand.length} echoes</small></span>
+          <span className="scorePill">{viewer.bound.length} bound</span>
         </div>
-        <div className="cardFan" role="list" aria-label={`${actor.name}'s cards`}>
+        <div className="cardFan" role="list" aria-label={viewer.name === "You" ? "Your cards" : `${viewer.name}’s cards`}>
           {sortedHand.map((card) => (
             <VeilCardView
               key={card.id}
               card={card}
               selected={effectiveIdentity === card.identityId}
               onClick={() => canAct && setSelectedIdentity(card.identityId)}
+              onPointerDrop={canAct ? () => setSelectedIdentity(card.identityId) : undefined}
+              onPointerDragChange={canAct ? (dragging) => setDraggingIdentity(dragging ? card.identityId : null) : undefined}
             />
           ))}
         </div>
 
-        <div className="inquiryBar">
+        <div
+          className={`inquiryBar ${draggingIdentity ? "dragReady" : ""}`}
+          onDragOver={(event) => { if (canAct) event.preventDefault(); }}
+          onDragLeave={() => setDraggingIdentity(null)}
+          onDrop={(event) => {
+            event.preventDefault();
+            const identityId = event.dataTransfer.getData("text/plain") as IdentityId;
+            if (canAct && validIdentities.includes(identityId)) setSelectedIdentity(identityId);
+            setDraggingIdentity(null);
+          }}
+        >
           <div className="inquiryChoice">
             <small>Inquire after</small>
             <strong>{selected?.name ?? "No identity"}</strong>
           </div>
           <button className="inquireButton" type="button" onClick={inquire} disabled={!canAct || !effectiveIdentity || !effectiveTarget}>
             <span>{actor.kind === "ai" ? "Listening…" : busy ? "Inquiring…" : "INQUIRE"}</span>
+            <i>✦</i>
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function OnlineResults({
+  game,
+  seat,
+  rematch,
+  title,
+}: {
+  game: OnlineGameView;
+  seat: 0 | 1;
+  rematch: () => void;
+  title: () => void;
+}) {
+  const sorted = [...game.players].sort((a, b) => b.bound.length - a.bound.length);
+  const you = game.players[seat];
+  const isTie = game.winnerIds.length > 1;
+  const youWon = game.winnerIds.includes(you.id);
+  return (
+    <div className="modalScrim resultScrim" role="dialog" aria-modal="true" aria-labelledby="online-result-title">
+      <section className="modalPanel resultPanel">
+        <div className="resultGlow" aria-hidden="true" />
+        <Crest />
+        <p className="eyebrow">The final revelation</p>
+        <h2 id="online-result-title">{isTie ? "The circle is divided" : youWon ? "You prevail" : `${sorted[0]?.name} prevails`}</h2>
+        <p className="resultLead">{isTie ? "Two wills leave the Veil in perfect balance." : "Both devices have witnessed the final binding."}</p>
+        <div className="scoreList">
+          {sorted.map((player, index) => (
+            <article key={player.id} className={game.winnerIds.includes(player.id) ? "winner" : ""}>
+              <span>{index + 1}</span><b>{player.id === you.id ? `${player.name} · You` : player.name}</b><strong>{player.bound.length}</strong><small>bound</small>
+            </article>
+          ))}
+        </div>
+        <button className="primaryButton" type="button" onClick={rematch}>Begin an online rematch</button>
+        <button className="ghostButton" type="button" onClick={title}>Return to the threshold</button>
+      </section>
+    </div>
+  );
+}
+
+function OnlineGameTable({
+  room,
+  settings,
+  error,
+  act,
+  openPause,
+  openHistory,
+}: {
+  room: OnlineRoomView;
+  settings: UserSettings;
+  error: string;
+  act: (action: OnlineAction) => Promise<void>;
+  openPause: () => void;
+  openHistory: () => void;
+}) {
+  const game = room.game!;
+  const you = game.players[room.seat];
+  const opponent = game.players[room.seat === 0 ? 1 : 0];
+  const actor = game.players[game.currentPlayer];
+  const [selectedIdentity, setSelectedIdentity] = useState<IdentityId | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [draggingIdentity, setDraggingIdentity] = useState<IdentityId | null>(null);
+  const identities = useMemo(
+    () => [...new Set(game.yourHand.map((card) => card.identityId))],
+    [game.yourHand],
+  );
+  const effectiveIdentity =
+    selectedIdentity && identities.includes(selectedIdentity)
+      ? selectedIdentity
+      : (identities[0] ?? null);
+  const selected = effectiveIdentity ? getIdentity(effectiveIdentity) : null;
+  const canAct = game.status === "active" && game.currentPlayer === room.seat && !busy;
+
+  const inquire = async () => {
+    if (!canAct || !effectiveIdentity || !opponent) return;
+    setBusy(true);
+    tone(settings.sound, "tap");
+    haptic(settings.haptics);
+    try {
+      await act({
+        type: "inquire",
+        version: room.version,
+        targetId: opponent.id,
+        identityId: effectiveIdentity,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="gameTable onlineTable">
+      <header className="gameHeader">
+        <IconButton label="Pause game" onClick={openPause}>☰</IconButton>
+        <div className="gameWordmark"><Crest small /><span><b>VEILBOUND</b><small>Online · Turn {game.turn}</small></span></div>
+        <IconButton label="Open turn history" onClick={openHistory}>⌛</IconButton>
+      </header>
+
+      <div className="onlineStatus"><i className="connectedDot" />Private room {room.id} · synchronized</div>
+      <div className="opponents" data-count="1">
+        <OpponentMedallion
+          player={opponent}
+          active={game.currentPlayer !== room.seat}
+          target={game.currentPlayer === room.seat}
+          selectable={false}
+          onClick={() => undefined}
+        />
+      </div>
+
+      <div className="messageRibbon" aria-live="polite">
+        <i className="ribbonFlourish" aria-hidden="true" />
+        <p>{busy ? "Your inquiry crosses the Veil…" : game.currentPlayer !== room.seat && game.status === "active" ? `${actor.name} is choosing an inquiry…` : game.lastMessage}</p>
+      </div>
+      {error && <div className="onlineToast" role="status">{error}</div>}
+
+      <div className="tableCenter">
+        <div className="boundSummary">
+          <span>Your bindings</span>
+          <BoundRow player={you} />
+        </div>
+        <button className="deckButton" type="button" aria-label={`${game.deckCount} cards remain in the Veil`} disabled>
+          <span className="deckHalo" />
+          <CardBack count={game.deckCount} />
+          <small>The Veil</small>
+        </button>
+      </div>
+
+      <div className={`handPanel ${settings.largeCards ? "largeCards" : ""}`}>
+        <div className="handHeader">
+          <span><b>Your hand</b><small>{game.yourHand.length} private echoes</small></span>
+          <span className="scorePill">{you.bound.length} bound</span>
+        </div>
+        <div className="cardFan" role="list" aria-label="Your private cards">
+          {sortHand(game.yourHand).map((card) => (
+            <VeilCardView
+              key={card.id}
+              card={card}
+              selected={effectiveIdentity === card.identityId}
+              onClick={() => setSelectedIdentity(card.identityId)}
+              onPointerDrop={canAct ? () => setSelectedIdentity(card.identityId) : undefined}
+              onPointerDragChange={canAct ? (dragging) => setDraggingIdentity(dragging ? card.identityId : null) : undefined}
+            />
+          ))}
+        </div>
+
+        <div
+          className={`inquiryBar ${draggingIdentity ? "dragReady" : ""}`}
+          onDragOver={(event) => { if (canAct) event.preventDefault(); }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const identityId = event.dataTransfer.getData("text/plain") as IdentityId;
+            if (identities.includes(identityId)) setSelectedIdentity(identityId);
+            setDraggingIdentity(null);
+          }}
+        >
+          <div className="inquiryChoice">
+            <small>{canAct ? "Inquire after" : `Waiting for ${actor.name}`}</small>
+            <strong>{selected?.name ?? "No identity"}</strong>
+          </div>
+          <button className="inquireButton" type="button" onClick={inquire} disabled={!canAct || !effectiveIdentity}>
+            <span>{busy ? "SENDING…" : canAct ? "INQUIRE" : "WAITING…"}</span>
             <i>✦</i>
           </button>
         </div>
@@ -671,9 +1172,15 @@ export default function VeilboundGame() {
   const [pauseOpen, setPauseOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [privacyCurtain, setPrivacyCurtain] = useState(false);
-  const [settingsReturn, setSettingsReturn] = useState<"title" | "game">("title");
+  const [settingsReturn, setSettingsReturn] = useState<"title" | "game" | "online-setup">("title");
+  const [onlineCredentials, setOnlineCredentials] = useState<OnlineCredentials | null>(null);
+  const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null);
+  const [onlineRoom, setOnlineRoom] = useState<OnlineRoomView | null>(null);
+  const [onlineBusy, setOnlineBusy] = useState(false);
+  const [onlineError, setOnlineError] = useState("");
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingGame = useRef<string | undefined>(undefined);
+  const recordingOnlineGame = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     const load = window.setTimeout(() => {
@@ -681,11 +1188,22 @@ export default function VeilboundGame() {
         const saved = localStorage.getItem(SAVE_KEY);
         const savedSettings = localStorage.getItem(SETTINGS_KEY);
         const savedStats = localStorage.getItem(STATS_KEY);
+        const savedOnline = localStorage.getItem(ONLINE_KEY);
         if (saved) setGame(JSON.parse(saved) as GameState);
         if (savedSettings) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) });
         if (savedStats) setStats({ ...DEFAULT_STATS, ...JSON.parse(savedStats) });
+        const query = new URLSearchParams(window.location.search);
+        const roomId = query.get("room")?.trim().toUpperCase() ?? "";
+        const token = query.get("key")?.trim() ?? "";
+        if (roomId && token) {
+          setPendingInvite({ roomId, token });
+          setScreen("online-setup");
+        } else if (savedOnline) {
+          setOnlineCredentials(JSON.parse(savedOnline) as OnlineCredentials);
+        }
       } catch {
         localStorage.removeItem(SAVE_KEY);
+        localStorage.removeItem(ONLINE_KEY);
       }
       setReady(true);
     }, 0);
@@ -710,6 +1228,35 @@ export default function VeilboundGame() {
   }, [ready, stats]);
 
   useEffect(() => {
+    if (!ready || screen !== "online-setup" || !onlineCredentials) return;
+    let active = true;
+    const credentials = onlineCredentials;
+
+    const refresh = async () => {
+      try {
+        const response = await fetch(`/api/rooms/${credentials.roomId}`, {
+          headers: { Authorization: `Bearer ${credentials.token}` },
+          cache: "no-store",
+        });
+        const payload = await responseJson<{ room: OnlineRoomView }>(response);
+        if (active) {
+          setOnlineRoom(payload.room);
+          setOnlineError("");
+        }
+      } catch (error) {
+        if (active) setOnlineError(error instanceof Error ? error.message : "The circle could not be reached.");
+      }
+    };
+
+    void refresh();
+    const interval = window.setInterval(refresh, 1400);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [onlineCredentials, ready, screen]);
+
+  useEffect(() => {
     if (
       !game ||
       game.status !== "complete" ||
@@ -731,6 +1278,30 @@ export default function VeilboundGame() {
     }, 0);
     return () => window.clearTimeout(record);
   }, [game, settings.haptics, settings.sound, stats.lastGameId]);
+
+  useEffect(() => {
+    const onlineGame = onlineRoom?.game;
+    if (
+      !onlineGame ||
+      onlineGame.status !== "complete" ||
+      stats.lastGameId === onlineGame.id ||
+      recordingOnlineGame.current === onlineGame.id
+    ) return;
+    recordingOnlineGame.current = onlineGame.id;
+    const you = onlineGame.players[onlineRoom.seat];
+    const record = window.setTimeout(() => {
+      setStats((current) => current.lastGameId === onlineGame.id ? current : ({
+        games: current.games + 1,
+        wins: current.wins + (onlineGame.winnerIds.includes(you.id) ? 1 : 0),
+        identitiesBound: current.identitiesBound + you.bound.length,
+        bestScore: Math.max(current.bestScore, you.bound.length),
+        lastGameId: onlineGame.id,
+      }));
+      tone(settings.sound, "bind");
+      haptic(settings.haptics, [30, 50, 30, 50, 60]);
+    }, 0);
+    return () => window.clearTimeout(record);
+  }, [onlineRoom, settings.haptics, settings.sound, stats.lastGameId]);
 
   useEffect(() => {
     if (aiTimer.current) clearTimeout(aiTimer.current);
@@ -757,15 +1328,124 @@ export default function VeilboundGame() {
     setScreen("game");
   };
 
-  const startSolo = (difficulty: Difficulty) => {
+  const startSolo = (difficulty: Difficulty, botCount: 1 | 2) => {
     beginGame(createGame([
       { name: "You", kind: "human" },
-      { name: AI_NAMES[0], kind: "ai" },
+      ...AI_NAMES.slice(0, botCount).map((name) => ({ name, kind: "ai" as const })),
     ], { mode: "solo", difficulty }));
   };
 
   const startLocal = (names: string[]) => {
     beginGame(createGame(names.map((name) => ({ name, kind: "human" as const })), { mode: "local" }));
+  };
+
+  const rememberOnline = (credentials: OnlineCredentials) => {
+    setOnlineCredentials(credentials);
+    localStorage.setItem(ONLINE_KEY, JSON.stringify(credentials));
+  };
+
+  const clearInviteQuery = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("room");
+    url.searchParams.delete("key");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+
+  const createOnline = async (name: string) => {
+    setOnlineBusy(true);
+    setOnlineError("");
+    try {
+      const response = await fetch("/api/rooms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await responseJson<{ room: OnlineRoomView; credentials: OnlineCredentials }>(response);
+      rememberOnline(payload.credentials);
+      setOnlineRoom(payload.room);
+      setPendingInvite(null);
+      tone(settings.sound, "reveal");
+    } catch (error) {
+      setOnlineError(error instanceof Error ? error.message : "The invitation could not be created.");
+    } finally {
+      setOnlineBusy(false);
+    }
+  };
+
+  const joinOnline = async (name: string) => {
+    if (!pendingInvite) return;
+    setOnlineBusy(true);
+    setOnlineError("");
+    try {
+      const response = await fetch(`/api/rooms/${pendingInvite.roomId}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, token: pendingInvite.token }),
+      });
+      const payload = await responseJson<{ room: OnlineRoomView }>(response);
+      rememberOnline({ roomId: pendingInvite.roomId, token: pendingInvite.token });
+      setOnlineRoom(payload.room);
+      setPendingInvite(null);
+      clearInviteQuery();
+      tone(settings.sound, "reveal");
+      haptic(settings.haptics, [15, 35, 18]);
+    } catch (error) {
+      setOnlineError(error instanceof Error ? error.message : "The invitation could not be joined.");
+    } finally {
+      setOnlineBusy(false);
+    }
+  };
+
+  const applyOnline = async (action: OnlineAction) => {
+    if (!onlineCredentials) return;
+    setOnlineError("");
+    try {
+      const response = await fetch(`/api/rooms/${onlineCredentials.roomId}/action`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${onlineCredentials.token}`,
+        },
+        body: JSON.stringify(action),
+      });
+      const payload = await responseJson<{ room: OnlineRoomView }>(response);
+      const priorTurn = onlineRoom?.game?.turn;
+      setOnlineRoom(payload.room);
+      if (payload.room.game?.turn !== priorTurn) haptic(settings.haptics, 16);
+      tone(settings.sound, payload.room.game?.events[0]?.success ? "reveal" : "deny");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The inquiry could not cross the Veil.";
+      setOnlineError(message);
+      try {
+        const refresh = await fetch(`/api/rooms/${onlineCredentials.roomId}`, {
+          headers: { Authorization: `Bearer ${onlineCredentials.token}` },
+          cache: "no-store",
+        });
+        const payload = await responseJson<{ room: OnlineRoomView }>(refresh);
+        setOnlineRoom(payload.room);
+      } catch {
+        // Keep the actionable message from the original request.
+      }
+    }
+  };
+
+  const leaveOnline = () => {
+    localStorage.removeItem(ONLINE_KEY);
+    setOnlineCredentials(null);
+    setOnlineRoom(null);
+    setPendingInvite(null);
+    setOnlineError("");
+    setPauseOpen(false);
+    clearInviteQuery();
+    setScreen("title");
+  };
+
+  const backFromOnline = () => {
+    if (pendingInvite) {
+      setPendingInvite(null);
+      clearInviteQuery();
+    }
+    setScreen(onlineCredentials ? "title" : "modes");
   };
 
   const updateGame = (next: GameState, previousPlayer: number) => {
@@ -792,6 +1472,13 @@ export default function VeilboundGame() {
     setScreen("title");
   };
 
+  const openTutorial = () => {
+    setRulesOpen(false);
+    setPauseOpen(false);
+    setHistoryOpen(false);
+    setScreen("tutorial");
+  };
+
   if (!ready) {
     return <main className="veilboundApp loadingScreen"><Crest /><p>Finding the circle…</p></main>;
   }
@@ -802,17 +1489,56 @@ export default function VeilboundGame() {
       <div className="appShell">
         {screen === "title" && (
           <TitleScreen
-            canContinue={Boolean(game?.status === "active")}
-            onContinue={() => { setScreen("game"); setPrivacyCurtain(game?.mode === "local"); }}
+            canContinue={Boolean(onlineCredentials || game?.status === "active")}
+            onContinue={() => {
+              if (onlineCredentials) {
+                setScreen("online-setup");
+              } else {
+                setScreen("game");
+                setPrivacyCurtain(game?.mode === "local");
+              }
+            }}
             onPlay={() => setScreen("modes")}
             onRules={() => setRulesOpen(true)}
+            onTutorial={openTutorial}
             onChronicle={() => setScreen("chronicle")}
             onSettings={() => { setSettingsReturn("title"); setScreen("settings"); }}
           />
         )}
-        {screen === "modes" && <ModesScreen back={() => setScreen("title")} solo={() => setScreen("solo-setup")} local={() => setScreen("local-setup")} />}
+        {screen === "modes" && (
+          <ModesScreen
+            back={() => setScreen("title")}
+            solo={() => setScreen("solo-setup")}
+            online={() => { setOnlineError(""); setScreen("online-setup"); }}
+            local={() => setScreen("local-setup")}
+          />
+        )}
         {screen === "solo-setup" && <SoloSetup back={() => setScreen("modes")} start={startSolo} />}
+        {screen === "tutorial" && <TutorialScreen back={() => setScreen("title")} practice={() => startSolo("novice", 1)} />}
         {screen === "local-setup" && <LocalSetup back={() => setScreen("modes")} start={startLocal} />}
+        {screen === "online-setup" && !onlineRoom?.game && (
+          <OnlineLobby
+            invite={pendingInvite}
+            credentials={onlineCredentials}
+            room={onlineRoom}
+            busy={onlineBusy}
+            error={onlineError}
+            create={createOnline}
+            join={joinOnline}
+            leave={leaveOnline}
+            back={backFromOnline}
+          />
+        )}
+        {screen === "online-setup" && onlineRoom?.game && (
+          <OnlineGameTable
+            room={onlineRoom}
+            settings={settings}
+            error={onlineError}
+            act={applyOnline}
+            openPause={() => setPauseOpen(true)}
+            openHistory={() => setHistoryOpen(true)}
+          />
+        )}
         {screen === "chronicle" && <ChronicleScreen stats={stats} back={() => setScreen("title")} />}
         {screen === "settings" && <SettingsPanel settings={settings} setSettings={setSettings} back={() => setScreen(settingsReturn)} />}
         {screen === "game" && game && (
@@ -820,8 +1546,8 @@ export default function VeilboundGame() {
         )}
       </div>
 
-      {rulesOpen && <RulesPanel close={() => setRulesOpen(false)} />}
-      {pauseOpen && game && (
+      {rulesOpen && <RulesPanel close={() => setRulesOpen(false)} tutorial={openTutorial} />}
+      {pauseOpen && screen === "game" && game && (
         <PauseMenu
           resume={() => setPauseOpen(false)}
           rules={() => setRulesOpen(true)}
@@ -830,11 +1556,30 @@ export default function VeilboundGame() {
           abandon={abandon}
         />
       )}
-      {historyOpen && game && <HistoryPanel game={game} close={() => setHistoryOpen(false)} />}
+      {pauseOpen && screen === "online-setup" && onlineRoom?.game && (
+        <PauseMenu
+          resume={() => setPauseOpen(false)}
+          rules={() => setRulesOpen(true)}
+          settings={() => { setSettingsReturn("online-setup"); setPauseOpen(false); setScreen("settings"); }}
+          title={saveAndLeave}
+          abandon={leaveOnline}
+          abandonLabel="Leave this room"
+        />
+      )}
+      {historyOpen && screen === "game" && game && <HistoryPanel game={game} close={() => setHistoryOpen(false)} />}
+      {historyOpen && screen === "online-setup" && onlineRoom?.game && <HistoryPanel game={onlineRoom.game} close={() => setHistoryOpen(false)} />}
       {screen === "game" && game?.mode === "local" && privacyCurtain && game.status === "active" && (
         <PassCurtain playerName={game.players[game.currentPlayer].name} reveal={() => setPrivacyCurtain(false)} />
       )}
       {screen === "game" && game?.status === "complete" && <Results game={game} rematch={rematch} title={() => { setScreen("title"); }} />}
+      {screen === "online-setup" && onlineRoom?.game?.status === "complete" && (
+        <OnlineResults
+          game={onlineRoom.game}
+          seat={onlineRoom.seat}
+          rematch={() => void applyOnline({ type: "rematch", version: onlineRoom.version })}
+          title={() => setScreen("title")}
+        />
+      )}
     </main>
   );
 }
