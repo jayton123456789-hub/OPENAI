@@ -73,6 +73,18 @@ interface PendingInvite {
   token: string;
 }
 
+interface TurnOutcome {
+  id: string;
+  kind: "transfer" | "draw" | "bind" | "empty";
+  eyebrow: string;
+  title: string;
+  message: string;
+  cards: VeilCard[];
+  identityId: IdentityId;
+  bound: IdentityId[];
+  buttonLabel: "Continue turn" | "End turn" | "See final revelation";
+}
+
 async function responseJson<T>(response: Response): Promise<T> {
   const payload = (await response.json()) as T & { error?: string };
   if (!response.ok) throw new Error(payload.error || "The Veil did not answer.");
@@ -153,31 +165,16 @@ function VeilCardView({
   card,
   selected,
   compact,
+  entering,
   onClick,
-  onPointerDrop,
-  onPointerDragChange,
-  dropSelector = ".inquiryBar",
 }: {
   card: VeilCard;
   selected?: boolean;
   compact?: boolean;
+  entering?: boolean;
   onClick?: () => void;
-  onPointerDrop?: () => void;
-  onPointerDragChange?: (dragging: boolean) => void;
-  dropSelector?: string;
 }) {
   const identity = getIdentity(card.identityId);
-  const pointerStart = useRef<{ x: number; y: number } | null>(null);
-  const pointerDragged = useRef(false);
-  const [pointerDragging, setPointerDragging] = useState(false);
-
-  const resetPointerCard = (element: HTMLButtonElement) => {
-    pointerStart.current = null;
-    setPointerDragging(false);
-    onPointerDragChange?.(false);
-    element.style.removeProperty("--drag-x");
-    element.style.removeProperty("--drag-y");
-  };
   const content = (
     <>
       <span className="cardCorner"><b>{identity.sigil}</b><i>◆</i></span>
@@ -192,44 +189,13 @@ function VeilCardView({
   );
 
   if (!onClick) {
-    return <div className={`veilCard ${compact ? "compact" : ""}`}>{content}</div>;
+    return <div className={`veilCard ${compact ? "compact" : ""} ${entering ? "cardEntering" : ""}`}>{content}</div>;
   }
   return (
     <button
-      className={`veilCard selectable ${selected ? "selected" : ""} ${compact ? "compact" : ""} ${onPointerDrop ? "pointerDraggable" : ""} ${pointerDragging ? "pointerDragging" : ""}`}
+      className={`veilCard selectable ${selected ? "selected" : ""} ${compact ? "compact" : ""} ${entering ? "cardEntering" : ""}`}
       type="button"
-      onClick={() => {
-        if (pointerDragged.current) {
-          pointerDragged.current = false;
-          return;
-        }
-        onClick();
-      }}
-      onPointerDown={(event) => {
-        if (!onPointerDrop) return;
-        pointerStart.current = { x: event.clientX, y: event.clientY };
-        pointerDragged.current = false;
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }}
-      onPointerMove={(event) => {
-        if (!pointerStart.current || !onPointerDrop) return;
-        const x = event.clientX - pointerStart.current.x;
-        const y = event.clientY - pointerStart.current.y;
-        if (Math.hypot(x, y) < 9 && !pointerDragging) return;
-        pointerDragged.current = true;
-        setPointerDragging(true);
-        onPointerDragChange?.(true);
-        event.currentTarget.style.setProperty("--drag-x", `${x}px`);
-        event.currentTarget.style.setProperty("--drag-y", `${y}px`);
-      }}
-      onPointerUp={(event) => {
-        if (!pointerStart.current || !onPointerDrop) return;
-        const dropTarget = document.elementFromPoint(event.clientX, event.clientY)?.closest(dropSelector);
-        if (pointerDragged.current && dropTarget) onPointerDrop();
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-        resetPointerCard(event.currentTarget);
-      }}
-      onPointerCancel={(event) => resetPointerCard(event.currentTarget)}
+      onClick={onClick}
       aria-pressed={selected}
       aria-label={`Choose ${identity.name}, ${card.echo}`}
     >
@@ -244,6 +210,138 @@ function CardBack({ count, small = false }: { count?: number; small?: boolean })
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/assets/card-back.webp" alt="Face-down Veil card" draggable={false} />
       {typeof count === "number" && <span className="deckCount">{count}</span>}
+    </div>
+  );
+}
+
+function outcomeButtonLabel(nextPlayer: number, actorIndex: number, status: "active" | "complete") {
+  if (status === "complete") return "See final revelation" as const;
+  return nextPlayer === actorIndex ? "Continue turn" as const : "End turn" as const;
+}
+
+function buildLocalOutcome(
+  before: GameState,
+  next: GameState,
+  actorIndex: number,
+  targetId: string,
+  identityId: IdentityId,
+): TurnOutcome {
+  const actorBefore = before.players[actorIndex];
+  const actorAfter = next.players[actorIndex];
+  const target = before.players.find((player) => player.id === targetId)!;
+  const offered = target.hand.filter((card) => card.identityId === identityId);
+  const drawn = offered.length === 0 ? before.deck.at(-1) : undefined;
+  const bound = actorAfter.bound.filter((id) => !actorBefore.bound.includes(id));
+  const identity = getIdentity(bound[0] ?? identityId);
+  const retained = next.status === "active" && next.currentPlayer === actorIndex;
+
+  let kind: TurnOutcome["kind"] = offered.length ? "transfer" : drawn ? "draw" : "empty";
+  let eyebrow = offered.length ? "Echoes revealed" : "Draw from the Veil";
+  let title = offered.length
+    ? `${offered.length} new ${offered.length === 1 ? "Echo" : "Echoes"}`
+    : drawn
+      ? `You drew ${getIdentity(drawn.identityId).name}`
+      : "The Veil is empty";
+  let message = offered.length
+    ? `${target.name} surrendered every Echo of ${getIdentity(identityId).name} they held.`
+    : drawn
+      ? `${drawn.echo} has joined your hand.${retained ? " You earned another inquiry." : " Your turn is complete."}`
+      : "No card remains to answer the inquiry.";
+
+  if (bound.length) {
+    kind = "bind";
+    eyebrow = "Identity bound";
+    title = `${identity.name} is complete`;
+    message = `Memory, Desire, Fear, and Truth crossed the threshold and became one revelation.${retained ? " You may inquire again." : ""}`;
+  }
+
+  return {
+    id: `${next.id}-${next.turn}-${next.events[0]?.id ?? Date.now()}`,
+    kind,
+    eyebrow,
+    title,
+    message,
+    cards: offered.length ? offered : drawn ? [drawn] : [],
+    identityId,
+    bound,
+    buttonLabel: outcomeButtonLabel(next.currentPlayer, actorIndex, next.status),
+  };
+}
+
+function buildOnlineOutcome(
+  before: OnlineGameView,
+  next: OnlineGameView,
+  seat: 0 | 1,
+  identityId: IdentityId,
+): TurnOutcome {
+  const beforeIds = new Set(before.yourHand.map((card) => card.id));
+  const cards = next.yourHand.filter((card) => !beforeIds.has(card.id));
+  const bound = next.players[seat].bound.filter((id) => !before.players[seat].bound.includes(id));
+  const opponentSeat = seat === 0 ? 1 : 0;
+  const transferred = Math.max(0, before.players[opponentSeat].handCount - next.players[opponentSeat].handCount);
+  const drew = next.deckCount < before.deckCount;
+  const retained = next.status === "active" && next.currentPlayer === seat;
+  const identity = getIdentity(bound[0] ?? identityId);
+
+  let kind: TurnOutcome["kind"] = transferred ? "transfer" : drew ? "draw" : "empty";
+  let eyebrow = transferred ? "Echoes revealed" : "Draw from the Veil";
+  let title = transferred
+    ? `${transferred} new ${transferred === 1 ? "Echo" : "Echoes"}`
+    : cards[0]
+      ? `You drew ${getIdentity(cards[0].identityId).name}`
+      : drew
+        ? "A new Echo answered"
+        : "The Veil is empty";
+  let message = transferred
+    ? `Every matching ${getIdentity(identityId).name} Echo crossed into your hand.`
+    : cards[0]
+      ? `${cards[0].echo} has joined your hand.${retained ? " You earned another inquiry." : " Your turn is complete."}`
+      : retained
+        ? "The Veil answered your inquiry. You may ask again."
+        : "Your inquiry is complete.";
+
+  if (bound.length) {
+    kind = "bind";
+    eyebrow = "Identity bound";
+    title = `${identity.name} is complete`;
+    message = `All four Echoes crossed the threshold and became one revelation.${retained ? " You may inquire again." : ""}`;
+  }
+
+  return {
+    id: `${next.id}-${next.turn}-${next.events[0]?.id ?? Date.now()}`,
+    kind,
+    eyebrow,
+    title,
+    message,
+    cards,
+    identityId,
+    bound,
+    buttonLabel: outcomeButtonLabel(next.currentPlayer, seat, next.status),
+  };
+}
+
+function TurnResolution({ outcome, continueTurn }: { outcome: TurnOutcome; continueTurn: () => void }) {
+  return (
+    <div className={`turnResolution ${outcome.kind}`} role="dialog" aria-modal="true" aria-labelledby="turn-resolution-title">
+      <section className="resolutionPanel">
+        <span className="resolutionRings" aria-hidden="true"><i /><i /><i /></span>
+        <p className="eyebrow">{outcome.eyebrow}</p>
+        <h2 id="turn-resolution-title">{outcome.title}</h2>
+        <div className="resolutionReveal" aria-hidden="true">
+          {outcome.cards.length ? outcome.cards.map((card) => (
+            <span key={card.id} className="receivedCard">
+              <VeilCardView card={card} compact />
+            </span>
+          )) : (
+            <span className="resolutionIdentity"><IdentityPortrait identityId={outcome.bound[0] ?? outcome.identityId} /></span>
+          )}
+          {outcome.bound.length > 0 && <span className="bindingMark"><i>✦</i><b>BOUND</b></span>}
+        </div>
+        <p className="resolutionMessage">{outcome.message}</p>
+        <button className="resolutionAction" type="button" onClick={continueTurn}>
+          <span>{outcome.buttonLabel}</span><i>→</i>
+        </button>
+      </section>
     </div>
   );
 }
@@ -376,7 +474,7 @@ function TitleScreen({
         <button className="secondaryButton" type="button" onClick={onTutorial}>Learn to play</button>
         <button className="ghostButton" type="button" onClick={onChronicle}>Open the chronicle</button>
       </div>
-      <p className="versionStamp">First Edition · 1.1</p>
+      <p className="versionStamp">First Edition · 1.2</p>
     </section>
   );
 }
@@ -474,9 +572,9 @@ const TUTORIAL_STEPS = [
     body: "The portrait and title tell you which identity a card belongs to. The small label names its Echo. You may ask only for an identity already represented in your hand.",
   },
   {
-    eyebrow: "Try the gesture",
-    title: "Prepare an inquiry",
-    body: "Tap The Warden—or drag the card into the inquiry seal. In a match, choose a rival and press Inquire. Tapping always remains available for phones and accessibility.",
+    eyebrow: "Try the turn flow",
+    title: "Tap, place, then ask",
+    body: "First tap The Warden in your hand. Then tap the center seal to place it. Once the card is resting in the center, the final Ask button becomes available.",
   },
   {
     eyebrow: "When they reveal",
@@ -502,12 +600,19 @@ const TUTORIAL_STEPS = [
 
 function TutorialScreen({ back, practice }: { back: () => void; practice: () => void }) {
   const [step, setStep] = useState(0);
+  const [selected, setSelected] = useState(false);
   const [prepared, setPrepared] = useState(false);
   const item = TUTORIAL_STEPS[step];
   const isGesture = step === 2;
   const last = step === TUTORIAL_STEPS.length - 1;
 
-  const prepareCard = () => setPrepared(true);
+  const selectCard = () => {
+    setSelected(true);
+    setPrepared(false);
+  };
+  const prepareCard = () => {
+    if (selected) setPrepared(true);
+  };
 
   return (
     <AppPage eyebrow="Guided rite" title="Learn Veilbound" back={back}>
@@ -525,19 +630,18 @@ function TutorialScreen({ back, practice }: { back: () => void; practice: () => 
             <>
               <VeilCardView
                 card={TUTORIAL_CARD}
-                selected={prepared}
-                onClick={prepareCard}
-                onPointerDrop={prepareCard}
-                dropSelector=".tutorialDrop"
+                selected={selected}
+                onClick={selectCard}
               />
-              <div
+              <button
+                type="button"
                 className={`tutorialDrop ${prepared ? "prepared" : ""}`}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => { event.preventDefault(); prepareCard(); }}
+                onClick={prepareCard}
+                aria-label={selected ? "Place The Warden in the center" : "Select The Warden first"}
               >
                 <Crest small />
-                <span>{prepared ? "The Warden is prepared" : "Drop The Warden here"}</span>
-              </div>
+                <span>{prepared ? "The Warden is placed" : selected ? "Tap to place it here" : "First tap the card"}</span>
+              </button>
             </>
           )}
           {step === 3 && <div className="tutorialTransfer"><span>1</span><b>→</b><span>3 Echoes</span></div>}
@@ -545,7 +649,7 @@ function TutorialScreen({ back, practice }: { back: () => void; practice: () => 
           {step === 5 && <div className="tutorialScore"><Crest small /><strong>+1</strong><span>The Warden bound</span></div>}
           {step === 6 && <div className="tutorialModes"><span>1–2 bots</span><span>Pass & play</span><span>Private link</span></div>}
         </div>
-        {isGesture && <p className="tutorialHint" aria-live="polite">{prepared ? "Perfect. The identity is selected and ready to inquire after." : "Try tapping or dragging the card."}</p>}
+        {isGesture && <p className="tutorialHint" aria-live="polite">{prepared ? "Perfect. The card is centered and the Ask button is now ready." : selected ? "Good. Now tap the center seal." : "Step 1: tap The Warden card."}</p>}
       </section>
       <div className="tutorialActions">
         {step > 0 && <button className="secondaryButton" type="button" onClick={() => setStep((value) => value - 1)}>Previous</button>}
@@ -869,31 +973,61 @@ function GameTable({
   const viewer = game.mode === "solo"
     ? (game.players.find((player) => player.kind === "human") ?? actor)
     : actor;
-  const [selectedIdentity, setSelectedIdentity] = useState<IdentityId | null>(null);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [placedCardId, setPlacedCardId] = useState<string | null>(null);
+  const [selectionTurn, setSelectionTurn] = useState(game.turn);
   const [targetId, setTargetId] = useState("");
   const [busy, setBusy] = useState(false);
-  const [draggingIdentity, setDraggingIdentity] = useState<IdentityId | null>(null);
+  const [outcome, setOutcome] = useState<TurnOutcome | null>(null);
+  const [pendingGame, setPendingGame] = useState<GameState | null>(null);
+  const [pendingNewCardIds, setPendingNewCardIds] = useState<string[]>([]);
+  const [newCardIds, setNewCardIds] = useState<string[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const entryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const validIdentities = useMemo(() => validInquiryIdentities(game, viewer.id), [game, viewer.id]);
   const targets = game.players.filter((player) => player.id !== actor.id && player.hand.length > 0);
   const displayedOpponents = game.mode === "solo"
     ? game.players.filter((player) => player.kind === "ai")
     : game.players.filter((player) => player.id !== actor.id);
-  const effectiveIdentity =
-    selectedIdentity && validIdentities.includes(selectedIdentity)
-      ? selectedIdentity
-      : (validIdentities[0] ?? null);
+  const selectionIsCurrent = selectionTurn === game.turn && actor.id === viewer.id;
+  const selectedCard = selectionIsCurrent ? viewer.hand.find((card) => card.id === selectedCardId) ?? null : null;
+  const placedCard = selectionIsCurrent ? viewer.hand.find((card) => card.id === placedCardId) ?? null : null;
+  const effectiveIdentity = placedCard && validIdentities.includes(placedCard.identityId)
+    ? placedCard.identityId
+    : null;
   const effectiveTarget = targets.some((player) => player.id === targetId)
     ? targetId
     : (targets[0]?.id ?? "");
-  const canAct = actor.kind === "human" && actor.id === viewer.id && !busy && game.status === "active";
+  const target = targets.find((player) => player.id === effectiveTarget) ?? null;
+  const canAct = actor.kind === "human"
+    && actor.id === viewer.id
+    && !busy
+    && !pendingGame
+    && game.status === "active";
 
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
+    if (entryTimerRef.current) clearTimeout(entryTimerRef.current);
   }, []);
 
+  const chooseCard = (card: VeilCard) => {
+    if (!canAct) return;
+    tone(settings.sound, "tap");
+    haptic(settings.haptics, 8);
+    setSelectionTurn(game.turn);
+    setSelectedCardId(card.id);
+    setPlacedCardId(null);
+  };
+
+  const placeCard = () => {
+    if (!canAct || !selectedCard) return;
+    tone(settings.sound, "reveal");
+    haptic(settings.haptics, [8, 24, 12]);
+    setPlacedCardId((current) => current === selectedCard.id ? null : selectedCard.id);
+  };
+
   const inquire = () => {
-    if (!canAct || !effectiveIdentity || !effectiveTarget) return;
+    if (!canAct || !effectiveIdentity || !effectiveTarget || !placedCard) return;
     tone(settings.sound, "tap");
     haptic(settings.haptics);
     setBusy(true);
@@ -905,94 +1039,133 @@ function GameTable({
         identityId: effectiveIdentity,
       });
       const latest = next.events[0];
+      const beforeIds = new Set(game.players[beforePlayer].hand.map((card) => card.id));
+      const enteringIds = next.players[beforePlayer].hand
+        .filter((card) => !beforeIds.has(card.id))
+        .map((card) => card.id);
       tone(settings.sound, latest?.success ? "reveal" : "deny");
       haptic(settings.haptics, latest?.success ? [15, 35, 18] : 20);
-      updateGame(next, beforePlayer);
+      setPendingGame(next);
+      setPendingNewCardIds(enteringIds);
+      setOutcome(buildLocalOutcome(game, next, beforePlayer, effectiveTarget, effectiveIdentity));
       setBusy(false);
     }, settings.reducedMotion ? 80 : 420);
   };
 
+  const continueTurn = () => {
+    if (!pendingGame) return;
+    const beforePlayer = game.currentPlayer;
+    setNewCardIds(pendingNewCardIds);
+    updateGame(pendingGame, beforePlayer);
+    setPendingGame(null);
+    setPendingNewCardIds([]);
+    setOutcome(null);
+    setSelectedCardId(null);
+    setPlacedCardId(null);
+    if (entryTimerRef.current) clearTimeout(entryTimerRef.current);
+    entryTimerRef.current = setTimeout(
+      () => setNewCardIds([]),
+      settings.reducedMotion ? 30 : 1050,
+    );
+  };
+
   const sortedHand = sortHand(viewer.hand);
-  const selected = effectiveIdentity ? getIdentity(effectiveIdentity) : null;
+  const selected = selectedCard ? getIdentity(selectedCard.identityId) : null;
+  const placed = placedCard ? getIdentity(placedCard.identityId) : null;
+  const turnInstruction = !canAct
+    ? actor.kind === "ai" ? `${actor.name} is considering the table` : `Waiting for ${actor.name}`
+    : !selectedCard
+      ? "Step 1 · Tap a card in your hand"
+      : !placedCard
+        ? `Step 2 · Tap the center to place ${selected?.name}`
+        : `Step 3 · Ask ${target?.name ?? "a seeker"}`;
 
   return (
-    <section className="gameTable">
-      <header className="gameHeader">
-        <IconButton label="Pause game" onClick={openPause}>☰</IconButton>
-        <div className="gameWordmark"><Crest small /><span><b>VEILBOUND</b><small>Turn {game.turn}</small></span></div>
-        <IconButton label="Open turn history" onClick={openHistory}>⌛</IconButton>
-      </header>
+    <>
+      <section className="gameTable">
+        <header className="gameHeader">
+          <IconButton label="Pause game" onClick={openPause}>☰</IconButton>
+          <div className="gameWordmark"><Crest small /><span><b>VEILBOUND</b><small>Turn {game.turn}</small></span></div>
+          <IconButton label="Open turn history" onClick={openHistory}>⌛</IconButton>
+        </header>
 
-      <div className="opponents" data-count={targets.length}>
-        {displayedOpponents.map((player) => (
-          <OpponentMedallion
-            key={player.id}
-            player={player}
-            active={game.players[game.currentPlayer].id === player.id}
-            target={canAct && effectiveTarget === player.id}
-            selectable={canAct && targets.length > 1 && player.hand.length > 0}
-            onClick={() => setTargetId(player.id)}
-          />
-        ))}
-      </div>
-
-      <div className="messageRibbon" aria-live="polite">
-        <i className="ribbonFlourish" aria-hidden="true" />
-        <p>{busy ? `${actor.name} reaches toward the Veil…` : game.lastMessage}</p>
-      </div>
-
-      <div className="tableCenter">
-        <div className="boundSummary">
-          <span>{viewer.name}</span>
-          <BoundRow player={viewer} />
-        </div>
-        <button className="deckButton" type="button" aria-label={`${game.deck.length} cards remain in the Veil`} disabled>
-          <span className="deckHalo" />
-          <CardBack count={game.deck.length} />
-          <small>The Veil</small>
-        </button>
-      </div>
-
-      <div className={`handPanel ${settings.largeCards ? "largeCards" : ""}`}>
-        <div className="handHeader">
-          <span><b>{viewer.name === "You" ? "Your hand" : `${viewer.name}’s hand`}</b><small>{viewer.hand.length} echoes</small></span>
-          <span className="scorePill">{viewer.bound.length} bound</span>
-        </div>
-        <div className="cardFan" role="list" aria-label={viewer.name === "You" ? "Your cards" : `${viewer.name}’s cards`}>
-          {sortedHand.map((card) => (
-            <VeilCardView
-              key={card.id}
-              card={card}
-              selected={effectiveIdentity === card.identityId}
-              onClick={() => canAct && setSelectedIdentity(card.identityId)}
-              onPointerDrop={canAct ? () => setSelectedIdentity(card.identityId) : undefined}
-              onPointerDragChange={canAct ? (dragging) => setDraggingIdentity(dragging ? card.identityId : null) : undefined}
+        <div className="opponents" data-count={targets.length}>
+          {displayedOpponents.map((player) => (
+            <OpponentMedallion
+              key={player.id}
+              player={player}
+              active={game.players[game.currentPlayer].id === player.id}
+              target={canAct && effectiveTarget === player.id}
+              selectable={canAct && targets.length > 1 && player.hand.length > 0}
+              onClick={() => setTargetId(player.id)}
             />
           ))}
         </div>
 
-        <div
-          className={`inquiryBar ${draggingIdentity ? "dragReady" : ""}`}
-          onDragOver={(event) => { if (canAct) event.preventDefault(); }}
-          onDragLeave={() => setDraggingIdentity(null)}
-          onDrop={(event) => {
-            event.preventDefault();
-            const identityId = event.dataTransfer.getData("text/plain") as IdentityId;
-            if (canAct && validIdentities.includes(identityId)) setSelectedIdentity(identityId);
-            setDraggingIdentity(null);
-          }}
-        >
-          <div className="inquiryChoice">
-            <small>Inquire after</small>
-            <strong>{selected?.name ?? "No identity"}</strong>
+        <div key={game.events[0]?.id ?? "opening"} className="messageRibbon eventRibbon" aria-live="polite">
+          <i className="ribbonFlourish" aria-hidden="true" />
+          <p>{busy ? `${actor.name} reaches toward the Veil…` : game.lastMessage}</p>
+        </div>
+
+        <div className="tableCenter">
+          <div className="boundSummary">
+            <span>{viewer.name}</span>
+            <BoundRow player={viewer} />
           </div>
-          <button className="inquireButton" type="button" onClick={inquire} disabled={!canAct || !effectiveIdentity || !effectiveTarget}>
-            <span>{actor.kind === "ai" ? "Listening…" : busy ? "Inquiring…" : "INQUIRE"}</span>
-            <i>✦</i>
+          <button
+            className={`centerSeal ${selectedCard ? "readyToPlace" : ""} ${placedCard ? "placed" : ""}`}
+            type="button"
+            onClick={placeCard}
+            disabled={!canAct || !selectedCard}
+            aria-label={placedCard ? `Remove ${placed?.name} from the center` : selectedCard ? `Place ${selected?.name} in the center` : "Select a card first"}
+          >
+            <span className="centerSealGlow" />
+            {placedCard ? <VeilCardView card={placedCard} compact /> : <Crest small />}
+            <small>{placedCard ? `${placed?.name} placed` : selectedCard ? `Tap to place ${selected?.name}` : "Select a card below"}</small>
+          </button>
+          <button key={game.deck.length} className="deckButton deckChanged" type="button" aria-label={`${game.deck.length} cards remain in the Veil`} disabled>
+            <span className="deckHalo" />
+            <CardBack count={game.deck.length} />
+            <small>The Veil</small>
           </button>
         </div>
-      </div>
-    </section>
+
+        <div className={`handPanel ${settings.largeCards ? "largeCards" : ""}`}>
+          <div className="handHeader">
+            <span><b>{viewer.name === "You" ? "Your hand" : `${viewer.name}’s hand`}</b><small>{viewer.hand.length} echoes</small></span>
+            <span className="scorePill">{viewer.bound.length} bound</span>
+          </div>
+          <div className="turnSteps" aria-label="Turn steps">
+            <span className={selectedCard ? "done" : "active"}><i>1</i>Tap card</span>
+            <span className={placedCard ? "done" : selectedCard ? "active" : ""}><i>2</i>Tap center</span>
+            <span className={placedCard ? "active" : ""}><i>3</i>Ask</span>
+          </div>
+          <div className="cardFan" role="list" aria-label={viewer.name === "You" ? "Your cards" : `${viewer.name}’s cards`}>
+            {sortedHand.map((card) => (
+              <VeilCardView
+                key={card.id}
+                card={card}
+                selected={selectedCard?.id === card.id}
+                entering={newCardIds.includes(card.id)}
+                onClick={canAct ? () => chooseCard(card) : undefined}
+              />
+            ))}
+          </div>
+
+          <div className="inquiryBar">
+            <div className="inquiryChoice">
+              <small>{turnInstruction}</small>
+              <strong>{placed?.name ?? selected?.name ?? "Choose an Echo"}</strong>
+            </div>
+            <button className="inquireButton" type="button" onClick={inquire} disabled={!canAct || !effectiveIdentity || !effectiveTarget || !placedCard}>
+              <span>{busy ? "REVEALING…" : placedCard ? `ASK ${target?.name?.toUpperCase() ?? "NOW"}` : selectedCard ? "PLACE IN CENTER" : "CHOOSE A CARD"}</span>
+              <i>✦</i>
+            </button>
+          </div>
+        </div>
+      </section>
+      {outcome && <TurnResolution outcome={outcome} continueTurn={continueTurn} />}
+    </>
   );
 }
 
@@ -1044,7 +1217,7 @@ function OnlineGameTable({
   room: OnlineRoomView;
   settings: UserSettings;
   error: string;
-  act: (action: OnlineAction) => Promise<void>;
+  act: (action: OnlineAction) => Promise<OnlineRoomView | undefined>;
   openPause: () => void;
   openHistory: () => void;
 }) {
@@ -1052,113 +1225,170 @@ function OnlineGameTable({
   const you = game.players[room.seat];
   const opponent = game.players[room.seat === 0 ? 1 : 0];
   const actor = game.players[game.currentPlayer];
-  const [selectedIdentity, setSelectedIdentity] = useState<IdentityId | null>(null);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [placedCardId, setPlacedCardId] = useState<string | null>(null);
+  const [selectionTurn, setSelectionTurn] = useState(game.turn);
   const [busy, setBusy] = useState(false);
-  const [draggingIdentity, setDraggingIdentity] = useState<IdentityId | null>(null);
-  const identities = useMemo(
-    () => [...new Set(game.yourHand.map((card) => card.identityId))],
-    [game.yourHand],
-  );
-  const effectiveIdentity =
-    selectedIdentity && identities.includes(selectedIdentity)
-      ? selectedIdentity
-      : (identities[0] ?? null);
-  const selected = effectiveIdentity ? getIdentity(effectiveIdentity) : null;
-  const canAct = game.status === "active" && game.currentPlayer === room.seat && !busy;
+  const [outcome, setOutcome] = useState<TurnOutcome | null>(null);
+  const [pendingNewCardIds, setPendingNewCardIds] = useState<string[]>([]);
+  const [newCardIds, setNewCardIds] = useState<string[]>([]);
+  const entryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectionIsCurrent = selectionTurn === game.turn && game.currentPlayer === room.seat;
+  const selectedCard = selectionIsCurrent ? game.yourHand.find((card) => card.id === selectedCardId) ?? null : null;
+  const placedCard = selectionIsCurrent ? game.yourHand.find((card) => card.id === placedCardId) ?? null : null;
+  const effectiveIdentity = placedCard?.identityId ?? null;
+  const selected = selectedCard ? getIdentity(selectedCard.identityId) : null;
+  const placed = placedCard ? getIdentity(placedCard.identityId) : null;
+  const canAct = game.status === "active" && game.currentPlayer === room.seat && !busy && !outcome;
+
+  useEffect(() => () => {
+    if (entryTimerRef.current) clearTimeout(entryTimerRef.current);
+  }, []);
+
+  const chooseCard = (card: VeilCard) => {
+    if (!canAct) return;
+    tone(settings.sound, "tap");
+    haptic(settings.haptics, 8);
+    setSelectionTurn(game.turn);
+    setSelectedCardId(card.id);
+    setPlacedCardId(null);
+  };
+
+  const placeCard = () => {
+    if (!canAct || !selectedCard) return;
+    tone(settings.sound, "reveal");
+    haptic(settings.haptics, [8, 24, 12]);
+    setPlacedCardId((current) => current === selectedCard.id ? null : selectedCard.id);
+  };
 
   const inquire = async () => {
-    if (!canAct || !effectiveIdentity || !opponent) return;
+    if (!canAct || !effectiveIdentity || !opponent || !placedCard) return;
     setBusy(true);
     tone(settings.sound, "tap");
     haptic(settings.haptics);
     try {
-      await act({
+      const nextRoom = await act({
         type: "inquire",
         version: room.version,
         targetId: opponent.id,
         identityId: effectiveIdentity,
       });
+      if (nextRoom?.game) {
+        const beforeIds = new Set(game.yourHand.map((card) => card.id));
+        setPendingNewCardIds(nextRoom.game.yourHand.filter((card) => !beforeIds.has(card.id)).map((card) => card.id));
+        setOutcome(buildOnlineOutcome(game, nextRoom.game, room.seat, effectiveIdentity));
+      }
     } finally {
       setBusy(false);
     }
   };
 
+  const continueTurn = () => {
+    setNewCardIds(pendingNewCardIds);
+    setPendingNewCardIds([]);
+    setOutcome(null);
+    setSelectedCardId(null);
+    setPlacedCardId(null);
+    if (entryTimerRef.current) clearTimeout(entryTimerRef.current);
+    entryTimerRef.current = setTimeout(
+      () => setNewCardIds([]),
+      settings.reducedMotion ? 30 : 1050,
+    );
+  };
+
+  const turnInstruction = !canAct
+    ? game.currentPlayer !== room.seat ? `Waiting for ${actor.name}` : "The Veil is resolving your inquiry"
+    : !selectedCard
+      ? "Step 1 · Tap a card in your hand"
+      : !placedCard
+        ? `Step 2 · Tap the center to place ${selected?.name}`
+        : `Step 3 · Ask ${opponent.name}`;
+
   return (
-    <section className="gameTable onlineTable">
-      <header className="gameHeader">
-        <IconButton label="Pause game" onClick={openPause}>☰</IconButton>
-        <div className="gameWordmark"><Crest small /><span><b>VEILBOUND</b><small>Online · Turn {game.turn}</small></span></div>
-        <IconButton label="Open turn history" onClick={openHistory}>⌛</IconButton>
-      </header>
+    <>
+      <section className="gameTable onlineTable">
+        <header className="gameHeader">
+          <IconButton label="Pause game" onClick={openPause}>☰</IconButton>
+          <div className="gameWordmark"><Crest small /><span><b>VEILBOUND</b><small>Online · Turn {game.turn}</small></span></div>
+          <IconButton label="Open turn history" onClick={openHistory}>⌛</IconButton>
+        </header>
 
-      <div className="onlineStatus"><i className="connectedDot" />Private room {room.id} · synchronized</div>
-      <div className="opponents" data-count="1">
-        <OpponentMedallion
-          player={opponent}
-          active={game.currentPlayer !== room.seat}
-          target={game.currentPlayer === room.seat}
-          selectable={false}
-          onClick={() => undefined}
-        />
-      </div>
-
-      <div className="messageRibbon" aria-live="polite">
-        <i className="ribbonFlourish" aria-hidden="true" />
-        <p>{busy ? "Your inquiry crosses the Veil…" : game.currentPlayer !== room.seat && game.status === "active" ? `${actor.name} is choosing an inquiry…` : game.lastMessage}</p>
-      </div>
-      {error && <div className="onlineToast" role="status">{error}</div>}
-
-      <div className="tableCenter">
-        <div className="boundSummary">
-          <span>Your bindings</span>
-          <BoundRow player={you} />
-        </div>
-        <button className="deckButton" type="button" aria-label={`${game.deckCount} cards remain in the Veil`} disabled>
-          <span className="deckHalo" />
-          <CardBack count={game.deckCount} />
-          <small>The Veil</small>
-        </button>
-      </div>
-
-      <div className={`handPanel ${settings.largeCards ? "largeCards" : ""}`}>
-        <div className="handHeader">
-          <span><b>Your hand</b><small>{game.yourHand.length} private echoes</small></span>
-          <span className="scorePill">{you.bound.length} bound</span>
-        </div>
-        <div className="cardFan" role="list" aria-label="Your private cards">
-          {sortHand(game.yourHand).map((card) => (
-            <VeilCardView
-              key={card.id}
-              card={card}
-              selected={effectiveIdentity === card.identityId}
-              onClick={() => setSelectedIdentity(card.identityId)}
-              onPointerDrop={canAct ? () => setSelectedIdentity(card.identityId) : undefined}
-              onPointerDragChange={canAct ? (dragging) => setDraggingIdentity(dragging ? card.identityId : null) : undefined}
-            />
-          ))}
+        <div className="onlineStatus"><i className="connectedDot" />Private room {room.id} · synchronized</div>
+        <div className="opponents" data-count="1">
+          <OpponentMedallion
+            player={opponent}
+            active={game.currentPlayer !== room.seat}
+            target={game.currentPlayer === room.seat}
+            selectable={false}
+            onClick={() => undefined}
+          />
         </div>
 
-        <div
-          className={`inquiryBar ${draggingIdentity ? "dragReady" : ""}`}
-          onDragOver={(event) => { if (canAct) event.preventDefault(); }}
-          onDrop={(event) => {
-            event.preventDefault();
-            const identityId = event.dataTransfer.getData("text/plain") as IdentityId;
-            if (identities.includes(identityId)) setSelectedIdentity(identityId);
-            setDraggingIdentity(null);
-          }}
-        >
-          <div className="inquiryChoice">
-            <small>{canAct ? "Inquire after" : `Waiting for ${actor.name}`}</small>
-            <strong>{selected?.name ?? "No identity"}</strong>
+        <div key={game.events[0]?.id ?? "opening"} className="messageRibbon eventRibbon" aria-live="polite">
+          <i className="ribbonFlourish" aria-hidden="true" />
+          <p>{busy ? "Your inquiry crosses the Veil…" : game.currentPlayer !== room.seat && game.status === "active" ? `${actor.name} is choosing an inquiry…` : game.lastMessage}</p>
+        </div>
+        {error && <div className="onlineToast" role="status">{error}</div>}
+
+        <div className="tableCenter">
+          <div className="boundSummary">
+            <span>Your bindings</span>
+            <BoundRow player={you} />
           </div>
-          <button className="inquireButton" type="button" onClick={inquire} disabled={!canAct || !effectiveIdentity}>
-            <span>{busy ? "SENDING…" : canAct ? "INQUIRE" : "WAITING…"}</span>
-            <i>✦</i>
+          <button
+            className={`centerSeal ${selectedCard ? "readyToPlace" : ""} ${placedCard ? "placed" : ""}`}
+            type="button"
+            onClick={placeCard}
+            disabled={!canAct || !selectedCard}
+            aria-label={placedCard ? `Remove ${placed?.name} from the center` : selectedCard ? `Place ${selected?.name} in the center` : "Select a card first"}
+          >
+            <span className="centerSealGlow" />
+            {placedCard ? <VeilCardView card={placedCard} compact /> : <Crest small />}
+            <small>{placedCard ? `${placed?.name} placed` : selectedCard ? `Tap to place ${selected?.name}` : "Select a card below"}</small>
+          </button>
+          <button key={game.deckCount} className="deckButton deckChanged" type="button" aria-label={`${game.deckCount} cards remain in the Veil`} disabled>
+            <span className="deckHalo" />
+            <CardBack count={game.deckCount} />
+            <small>The Veil</small>
           </button>
         </div>
-      </div>
-    </section>
+
+        <div className={`handPanel ${settings.largeCards ? "largeCards" : ""}`}>
+          <div className="handHeader">
+            <span><b>Your hand</b><small>{game.yourHand.length} private echoes</small></span>
+            <span className="scorePill">{you.bound.length} bound</span>
+          </div>
+          <div className="turnSteps" aria-label="Turn steps">
+            <span className={selectedCard ? "done" : "active"}><i>1</i>Tap card</span>
+            <span className={placedCard ? "done" : selectedCard ? "active" : ""}><i>2</i>Tap center</span>
+            <span className={placedCard ? "active" : ""}><i>3</i>Ask</span>
+          </div>
+          <div className="cardFan" role="list" aria-label="Your private cards">
+            {sortHand(game.yourHand).map((card) => (
+              <VeilCardView
+                key={card.id}
+                card={card}
+                selected={selectedCard?.id === card.id}
+                entering={newCardIds.includes(card.id)}
+                onClick={canAct ? () => chooseCard(card) : undefined}
+              />
+            ))}
+          </div>
+
+          <div className="inquiryBar">
+            <div className="inquiryChoice">
+              <small>{turnInstruction}</small>
+              <strong>{placed?.name ?? selected?.name ?? "Choose an Echo"}</strong>
+            </div>
+            <button className="inquireButton" type="button" onClick={inquire} disabled={!canAct || !effectiveIdentity || !placedCard}>
+              <span>{busy ? "REVEALING…" : placedCard ? `ASK ${opponent.name.toUpperCase()}` : selectedCard ? "PLACE IN CENTER" : game.currentPlayer === room.seat ? "CHOOSE A CARD" : "WAITING…"}</span>
+              <i>✦</i>
+            </button>
+          </div>
+        </div>
+      </section>
+      {outcome && <TurnResolution outcome={outcome} continueTurn={continueTurn} />}
+    </>
   );
 }
 
@@ -1413,6 +1643,7 @@ export default function VeilboundGame() {
       setOnlineRoom(payload.room);
       if (payload.room.game?.turn !== priorTurn) haptic(settings.haptics, 16);
       tone(settings.sound, payload.room.game?.events[0]?.success ? "reveal" : "deny");
+      return payload.room;
     } catch (error) {
       const message = error instanceof Error ? error.message : "The inquiry could not cross the Veil.";
       setOnlineError(message);
@@ -1426,6 +1657,7 @@ export default function VeilboundGame() {
       } catch {
         // Keep the actionable message from the original request.
       }
+      return undefined;
     }
   };
 

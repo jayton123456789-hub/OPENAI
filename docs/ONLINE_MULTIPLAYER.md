@@ -28,3 +28,4 @@ The `online_rooms` D1 table stores room status, display names, hashed seat keys,
 - Deterministic tests play complete matches without deadlock.
 - Privacy assertions inspect both sanitized seat views on every simulated turn.
 - Live preview testing covers room creation, guest joining, cross-tab synchronization, a successful transfer, a denial, the exact “Draw from the Veil.” history entry, and hidden-hand boundaries.
+- Online turns use the same tap-place-ask controls and resolution receipt as local play; the server remains authoritative while the acting device presents its End Turn or Continue Turn handoff.

@@ -6,14 +6,15 @@ When a rival has none of the requested identity, the official response is:
 
 > **Draw from the Veil.**
 
-## Finished First Edition 1.1 features
+## Finished First Edition 1.2 features
 
 - Complete 52-card rules engine with 13 identities and four Echoes per identity
 - Solo play with one or two fair AI rivals across three difficulty levels
 - Private two-device invitations with synchronized turns and no account requirement
 - Two-to-four-player pass-and-play with private handoff curtains
 - Seven-step guided tutorial with an interactive practice hand
-- Tap or drag cards into the inquiry seal using touch, mouse, or pen
+- Clear tap-place-ask turns: tap a card, tap the center seal, then confirm the inquiry
+- Animated card receipts, bindings, public events, and explicit Continue Turn / End Turn handoffs
 - Full title, mode selection, setup, rules, pause, settings, history, results, rematch, and chronicle flows
 - Automatic binding, empty-hand recovery, ties, end-game scoring, and edge-case handling
 - Local autosave and one-tap continuation after closing or refreshing the app

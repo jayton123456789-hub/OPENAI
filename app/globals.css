@@ -860,8 +860,14 @@ button:disabled {
   line-height: 1.35;
 }
 
+.eventRibbon { animation: ribbonArrive .5s cubic-bezier(.2,.85,.25,1) both; }
+@keyframes ribbonArrive {
+  0% { opacity: .25; transform: translateY(-7px) scale(.98); }
+  55% { transform: translateY(2px) scale(1.01); }
+}
+
 .tableCenter {
-  min-height: 174px;
+  min-height: 184px;
   flex: 1 1 auto;
   position: relative;
   display: grid;
@@ -887,6 +893,21 @@ button:disabled {
   gap: 3px;
   border: 0;
   background: transparent;
+}
+
+.tableCenter > .deckButton {
+  --deck-scale: .82;
+  position: absolute;
+  right: 21px;
+  transform: scale(var(--deck-scale));
+  transform-origin: center;
+}
+
+.deckChanged { animation: deckSettle .55s cubic-bezier(.2,.8,.25,1) both; }
+@keyframes deckSettle {
+  0% { opacity: .35; transform: scale(var(--deck-scale)) translateY(-13px) rotate(3deg); }
+  65% { transform: scale(var(--deck-scale)) translateY(2px) rotate(-1deg); }
+  100% { opacity: 1; transform: scale(var(--deck-scale)); }
 }
 
 .deckButton > small {
@@ -929,6 +950,43 @@ button:disabled {
   gap: 5px;
 }
 
+.centerSeal {
+  width: 126px;
+  height: 146px;
+  padding: 7px 8px 25px;
+  position: relative;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(197,170,120,.32);
+  border-radius: 45% 45% 42% 42% / 34% 34% 27% 27%;
+  background: radial-gradient(circle at 50% 42%, rgba(184,210,135,.08), rgba(8,17,11,.4) 66%);
+  color: rgba(238,226,201,.48);
+  box-shadow: inset 0 0 30px rgba(0,0,0,.24), 0 0 32px rgba(184,210,135,.04);
+  cursor: default;
+  transition: border-color .22s ease, background .22s ease, box-shadow .22s ease, transform .22s ease;
+}
+
+.centerSeal:disabled { opacity: .76; }
+.centerSeal .crest { transform: scale(.72); opacity: .55; }
+.centerSeal > small { position: absolute; left: 7px; right: 7px; bottom: 8px; color: inherit; font-size: 7px; line-height: 1.35; letter-spacing: .07em; text-align: center; text-transform: uppercase; }
+.centerSealGlow { position: absolute; inset: 18px; border: 1px solid rgba(184,210,135,.12); border-radius: 50%; opacity: 0; }
+.centerSeal.readyToPlace { border-color: var(--green-glow); color: var(--paper); background: radial-gradient(circle at 50% 42%, rgba(184,210,135,.2), rgba(8,17,11,.46) 68%); box-shadow: 0 0 0 4px rgba(184,210,135,.06), 0 0 30px rgba(184,210,135,.17), inset 0 0 26px rgba(184,210,135,.08); cursor: pointer; animation: centerInvite 1.35s ease-in-out infinite; }
+.centerSeal.readyToPlace .centerSealGlow { opacity: 1; animation: centerRing 1.35s ease-out infinite; }
+.centerSeal.placed { border-style: solid; border-color: #e1c993; animation: centerPlaced .42s cubic-bezier(.2,.9,.2,1) both; }
+.centerSeal.placed .crest { display: none; }
+.centerSeal .veilCard { width: 59px; min-width: 59px; height: 83px; pointer-events: none; box-shadow: 0 9px 20px rgba(0,0,0,.48), 0 0 17px rgba(184,210,135,.16); animation: cardPlace .42s cubic-bezier(.18,.9,.2,1.1) both; }
+.centerSeal .veilCard .cardPortrait { inset: 9px 4px 21px; }
+.centerSeal .veilCard .cardCopy { bottom: 4px; }
+.centerSeal .veilCard .cardCopy strong { font-size: 6px; }
+.centerSeal .veilCard .cardCopy small { font-size: 4px; margin-top: 2px; }
+.centerSeal .veilCard .cardCorner { transform: scale(.7); transform-origin: top left; }
+.centerSeal .veilCard .cardCornerBottom { transform: rotate(180deg) scale(.7); transform-origin: center; }
+@keyframes centerInvite { 50% { border-color: #e5cf9a; box-shadow: 0 0 0 7px rgba(184,210,135,.035), 0 0 38px rgba(184,210,135,.22), inset 0 0 26px rgba(184,210,135,.1); } }
+@keyframes centerRing { 80%,100% { inset: 5px; opacity: 0; } }
+@keyframes centerPlaced { 0% { transform: scale(.88); opacity: .45; } 65% { transform: scale(1.035); } }
+@keyframes cardPlace { from { transform: translateY(52px) scale(.7) rotate(-5deg); opacity: 0; } }
+
 .boundSummary > span { color: rgba(223, 205, 173, .42); font-size: 7px; letter-spacing: .12em; text-transform: uppercase; }
 .boundRow { max-width: 98px; display: flex; flex-wrap: wrap; gap: 3px; }
 .boundRow > span:not(.emptyBound) { width: 24px; height: 24px; border-radius: 50%; overflow: hidden; border: 1px solid rgba(197,170,120,.45); }
@@ -969,6 +1027,20 @@ button:disabled {
 .handHeader small { color: rgba(223,205,173,.42); font-size: 7px; text-transform: uppercase; letter-spacing: .08em; }
 .scorePill { border: 1px solid rgba(197,170,120,.25); border-radius: 999px; padding: 5px 8px; color: var(--gold); font-size: 7px; letter-spacing: .09em; text-transform: uppercase; }
 
+.turnSteps {
+  padding: 2px 13px 1px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.turnSteps span { min-height: 22px; display: flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid rgba(197,170,120,.12); border-radius: 999px; color: rgba(223,205,173,.28); background: rgba(8,17,11,.2); font-size: 6px; letter-spacing: .06em; text-transform: uppercase; transition: color .2s ease, border-color .2s ease, background .2s ease; }
+.turnSteps i { width: 13px; height: 13px; display: grid; place-items: center; border: 1px solid currentColor; border-radius: 50%; font-style: normal; font-size: 6px; }
+.turnSteps span.active { border-color: rgba(225,201,147,.55); color: var(--paper); background: rgba(138,116,73,.22); }
+.turnSteps span.done { border-color: rgba(184,210,135,.38); color: var(--green-glow); background: rgba(88,111,70,.18); }
+.turnSteps span.done i::after { content: "✓"; }
+.turnSteps span.done i { font-size: 0; }
+
 .cardFan {
   min-height: 146px;
   padding: 8px 16px 6px;
@@ -1004,6 +1076,12 @@ button:disabled {
 .veilCard.selectable { cursor: pointer; }
 .veilCard.selectable:hover { filter: brightness(1.04); }
 .veilCard.selected { transform: translateY(-7px); border-color: #e7cf98; box-shadow: 0 0 0 3px rgba(184,210,135,.17), 0 12px 22px rgba(0,0,0,.45); }
+.veilCard.cardEntering { animation: handCardEnter .85s cubic-bezier(.16,.9,.2,1.1) both; }
+@keyframes handCardEnter {
+  0% { transform: translateY(-115px) scale(.48) rotate(8deg); opacity: 0; filter: brightness(1.5); }
+  55% { transform: translateY(7px) scale(1.06) rotate(-2deg); opacity: 1; }
+  78% { transform: translateY(-4px) scale(.99) rotate(.5deg); }
+}
 .cardPortrait { position: absolute; inset: 12px 6px 30px; border-radius: 5px 5px 12px 12px; }
 .cardWash { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 47%, rgba(229, 215, 184, .22) 58%, #e5d7b8 77%); z-index: 3; pointer-events: none; }
 .cardCopy { position: absolute; z-index: 4; left: 5px; right: 5px; bottom: 6px; display: flex; flex-direction: column; align-items: center; text-align: center; line-height: 1; }
@@ -1056,6 +1134,68 @@ button:disabled {
 
 .inquireButton:disabled { opacity: .45; filter: grayscale(.3); }
 .inquireButton i { font-size: 8px; font-style: normal; }
+
+.turnResolution {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  padding: 19px;
+  background: radial-gradient(circle at 50% 42%, rgba(72,96,66,.3), transparent 52%), rgba(4,9,6,.88);
+  backdrop-filter: blur(12px);
+  animation: resolutionFade .28s ease both;
+}
+
+.resolutionPanel {
+  width: min(100%, 430px);
+  min-height: 480px;
+  padding: 30px 23px 22px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 1px solid rgba(225,201,147,.5);
+  border-radius: 29px;
+  background: radial-gradient(circle at 50% 35%, rgba(184,210,135,.13), transparent 35%), linear-gradient(180deg, rgba(43,58,40,.99), rgba(9,19,12,.995));
+  box-shadow: 0 35px 95px rgba(0,0,0,.7), inset 0 0 0 7px rgba(197,170,120,.035);
+  text-align: center;
+  animation: resolutionRise .52s cubic-bezier(.18,.9,.2,1.05) both;
+}
+
+.resolutionPanel::before { content: ""; position: absolute; inset: 9px; border: 1px solid rgba(197,170,120,.12); border-radius: 21px; pointer-events: none; }
+.resolutionPanel > *:not(.resolutionRings) { position: relative; z-index: 2; }
+.resolutionPanel h2 { margin: 7px 0 2px; color: var(--paper); font-family: var(--serif); font-size: 30px; font-weight: 400; }
+.resolutionRings { position: absolute; left: 50%; top: 164px; width: 210px; height: 210px; transform: translateX(-50%); }
+.resolutionRings i { position: absolute; inset: 0; border: 1px solid rgba(184,210,135,.2); border-radius: 50%; animation: resolutionRing 2.1s ease-out infinite; }
+.resolutionRings i:nth-child(2) { animation-delay: -.7s; }
+.resolutionRings i:nth-child(3) { animation-delay: -1.4s; }
+.resolutionReveal { min-height: 202px; width: 100%; display: flex; align-items: center; justify-content: center; margin: 2px 0 3px; }
+.receivedCard { --card-rotation: 0deg; margin-left: -23px; transform: rotate(var(--card-rotation)); transform-origin: bottom center; animation: receivedCard .68s cubic-bezier(.14,.9,.2,1.1) both; }
+.receivedCard:first-child { margin-left: 0; }
+.receivedCard:nth-child(1) { --card-rotation: -4deg; }
+.receivedCard:nth-child(2) { animation-delay: .1s; }
+.receivedCard:nth-child(3) { --card-rotation: 4deg; animation-delay: .2s; }
+.receivedCard:nth-child(4) { --card-rotation: 7deg; animation-delay: .3s; }
+.receivedCard .veilCard { width: 84px; min-width: 84px; height: 118px; box-shadow: 0 17px 30px rgba(0,0,0,.55), 0 0 21px rgba(184,210,135,.13); }
+.resolutionIdentity { width: 126px; height: 126px; padding: 6px; border: 1px solid #e1c993; border-radius: 50%; background: #18271a; box-shadow: 0 0 0 8px rgba(197,170,120,.06), 0 0 48px rgba(184,210,135,.24); animation: identityBind .8s cubic-bezier(.16,.9,.2,1.05) both; }
+.resolutionIdentity .identityPortrait { width: 100%; height: 100%; border-radius: 50%; }
+.bindingMark { position: absolute; top: 257px; left: 50%; min-width: 92px; padding: 7px 12px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid rgba(225,201,147,.62); border-radius: 999px; background: #243525; color: #f0dcae; transform: translateX(-50%); box-shadow: 0 8px 22px rgba(0,0,0,.45); animation: bindingStamp .52s .55s cubic-bezier(.18,.9,.25,1.15) both; }
+.bindingMark i { font-style: normal; font-size: 7px; }
+.bindingMark b { font-size: 7px; letter-spacing: .16em; }
+.resolutionMessage { max-width: 330px; min-height: 42px; margin: 0 auto 17px; color: rgba(238,226,201,.62); font-family: var(--serif); font-size: 12px; line-height: 1.55; }
+.resolutionAction { width: 100%; min-height: 61px; margin-top: auto; padding: 0 21px; display: flex; align-items: center; justify-content: space-between; border: 1px solid #e1c993; border-radius: 17px; background: linear-gradient(135deg, #9b8253, #d0b476 52%, #8a7046); color: #111b12; box-shadow: inset 0 0 0 1px rgba(65,45,16,.5), 0 11px 26px rgba(0,0,0,.34); font-family: var(--serif); font-size: 15px; font-weight: 700; letter-spacing: .04em; cursor: pointer; animation: actionInvite 1.5s 1s ease-in-out infinite; }
+.resolutionAction i { width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid rgba(17,27,18,.42); border-radius: 50%; font-style: normal; }
+.turnResolution.draw .resolutionPanel { background: radial-gradient(circle at 50% 35%, rgba(157,130,78,.2), transparent 37%), linear-gradient(180deg, rgba(49,58,39,.99), rgba(9,19,12,.995)); }
+.turnResolution.bind .resolutionPanel { border-color: rgba(184,210,135,.72); box-shadow: 0 35px 95px rgba(0,0,0,.7), 0 0 55px rgba(184,210,135,.17), inset 0 0 0 7px rgba(184,210,135,.04); }
+@keyframes resolutionFade { from { opacity: 0; } }
+@keyframes resolutionRise { from { opacity: 0; transform: translateY(35px) scale(.94); } }
+@keyframes resolutionRing { 0% { inset: 46%; opacity: .75; } 100% { inset: 0; opacity: 0; } }
+@keyframes receivedCard { 0% { opacity: 0; transform: translateY(-95px) scale(.55) rotate(13deg); } 68% { transform: translateY(7px) scale(1.05) rotate(-2deg); } 100% { opacity: 1; transform: rotate(var(--card-rotation)); } }
+@keyframes identityBind { from { opacity: 0; transform: scale(.45) rotate(-18deg); filter: brightness(1.8); } 66% { transform: scale(1.08) rotate(2deg); } }
+@keyframes bindingStamp { from { opacity: 0; transform: translateX(-50%) scale(1.7); } }
+@keyframes actionInvite { 50% { box-shadow: inset 0 0 0 1px rgba(65,45,16,.5), 0 15px 31px rgba(0,0,0,.4), 0 0 18px rgba(225,201,147,.2); } }
 
 .modalScrim,
 .passCurtain {
@@ -1247,18 +1387,6 @@ button:disabled {
 .connectedDot { width: 6px; height: 6px; border-radius: 50%; background: var(--green-glow); box-shadow: 0 0 8px rgba(184,210,135,.8); animation: connected 2s ease-in-out infinite; }
 @keyframes connected { 50% { opacity: .45; } }
 .onlineTable .opponents { min-height: 72px; }
-.inquiryBar.dragReady { margin: 0 7px; padding-inline: 7px; border: 1px dashed var(--green-glow); border-radius: 15px; background: rgba(184,210,135,.07); }
-.veilCard.pointerDraggable:active { transform: translateY(-10px) rotate(1.5deg) scale(1.025); cursor: grabbing; }
-.veilCard.pointerDragging {
-  z-index: 30;
-  transform: translate(var(--drag-x, 0), var(--drag-y, 0)) rotate(2deg) scale(1.045);
-  transition: none;
-  cursor: grabbing;
-  filter: brightness(1.08);
-  box-shadow: 0 20px 38px rgba(0,0,0,.55), 0 0 0 3px rgba(184,210,135,.2);
-}
-
-.veilCard.pointerDraggable { touch-action: pan-x; }
 
 @media (max-width: 380px) {
   .titleScreen { padding-left: 18px; padding-right: 18px; }
@@ -1267,7 +1395,15 @@ button:disabled {
   .modeArt { width: 76px; transform: scale(.8); }
   .veilCard { width: 84px; min-width: 84px; height: 118px; }
   .cardFan { min-height: 134px; }
-  .inquiryBar { grid-template-columns: 1fr 130px; }
+  .tableCenter { min-height: 170px; padding-inline: 8px; }
+  .centerSeal { width: 112px; height: 133px; }
+  .tableCenter > .deckButton { --deck-scale: .7; right: 8px; }
+  .boundSummary { left: 8px; }
+  .boundRow { max-width: 72px; }
+  .turnSteps { padding-inline: 9px; gap: 3px; }
+  .turnSteps span { font-size: 5px; }
+  .inquiryBar { grid-template-columns: minmax(0, 1fr) minmax(132px, 47%); }
+  .resolutionPanel { min-height: 455px; padding-inline: 18px; }
   .opponentCounts i:last-child { display: none; }
 }
 
@@ -1278,9 +1414,14 @@ button:disabled {
   .opponents { min-height: 70px; }
   .medallion { width: 40px; height: 40px; }
   .messageRibbon { min-height: 46px; }
-  .tableCenter { min-height: 125px; }
+  .tableCenter { min-height: 145px; }
+  .centerSeal { width: 105px; height: 116px; padding-bottom: 20px; }
+  .centerSeal .veilCard { width: 50px; min-width: 50px; height: 70px; }
+  .centerSeal > small { bottom: 5px; font-size: 6px; }
+  .tableCenter > .deckButton { --deck-scale: .68; }
   .cardBack { width: 60px; }
   .handHeader { height: 26px; }
+  .turnSteps span { min-height: 18px; }
   .cardFan { min-height: 124px; }
   .veilCard { width: 80px; min-width: 80px; height: 112px; }
   .inquiryBar { min-height: 50px; }

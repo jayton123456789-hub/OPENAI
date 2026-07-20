@@ -44,8 +44,9 @@ Every card is an Echo belonging to one of thirteen masked identities. A seeker m
 ## Guided play and interaction
 
 - Seven-step tutorial covers the objective, card anatomy, inquiries, successful transfers, “Draw from the Veil,” binding, scoring, privacy, and every play mode.
-- The card-selection step is interactive. Players can tap a card or drag it into the inquiry seal.
-- Pointer gestures use capture-based movement so mouse, pen, and touch all share the same rules.
+- The card-selection step is interactive and intentionally click-first: tap a card, tap the center seal to place it, then press the named Ask button.
+- Every resolution pauses on a clear receipt showing transferred or drawn cards, bindings, and either Continue Turn or End Turn before play proceeds.
+- New cards animate into the hand, while deck and public-event animations mark changes made by rivals and bots.
 - Reduced-motion settings preserve gameplay while removing nonessential movement.
 
 ## Identity deck
