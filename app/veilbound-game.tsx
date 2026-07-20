@@ -2,6 +2,10 @@
 
 import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import {
+  BankedBound,
+  bankableGroups,
+  boundValueForCardCount,
+  chooseAIBank,
   chooseAIInquiry,
   createGame,
   Difficulty,
@@ -9,10 +13,14 @@ import {
   getIdentity,
   IDENTITIES,
   IdentityId,
+  resolveBank,
   resolveInquiry,
+  scorePlayer,
   sortHand,
+  upgradeGameState,
   validInquiryIdentities,
   VeilCard,
+  WIN_SCORE,
 } from "@/lib/veilbound";
 import type {
   OnlineAction,
@@ -75,13 +83,14 @@ interface PendingInvite {
 
 interface TurnOutcome {
   id: string;
-  kind: "transfer" | "draw" | "bind" | "empty";
+  kind: "transfer" | "draw" | "bank" | "empty";
   eyebrow: string;
   title: string;
   message: string;
   cards: VeilCard[];
   identityId: IdentityId;
-  bound: IdentityId[];
+  banked?: BankedBound;
+  score?: number;
   buttonLabel: "Continue turn" | "End turn" | "See final revelation";
 }
 
@@ -204,12 +213,12 @@ function VeilCardView({
   );
 }
 
-function CardBack({ count, small = false }: { count?: number; small?: boolean }) {
+function CardBack({ count, small = false }: { count?: number | string; small?: boolean }) {
   return (
     <div className={`cardBack ${small ? "cardBackSmall" : ""}`}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/assets/card-back.webp" alt="Face-down Veil card" draggable={false} />
-      {typeof count === "number" && <span className="deckCount">{count}</span>}
+      {typeof count !== "undefined" && <span className="deckCount">{count}</span>}
     </div>
   );
 }
@@ -226,34 +235,31 @@ function buildLocalOutcome(
   targetId: string,
   identityId: IdentityId,
 ): TurnOutcome {
-  const actorBefore = before.players[actorIndex];
   const actorAfter = next.players[actorIndex];
   const target = before.players.find((player) => player.id === targetId)!;
   const offered = target.hand.filter((card) => card.identityId === identityId);
-  const drawn = offered.length === 0 ? before.deck.at(-1) : undefined;
-  const bound = actorAfter.bound.filter((id) => !actorBefore.bound.includes(id));
-  const identity = getIdentity(bound[0] ?? identityId);
+  const priorIds = new Set(before.players[actorIndex].hand.map((card) => card.id));
+  const drawn = offered.length === 0
+    ? actorAfter.hand.find((card) => !priorIds.has(card.id))
+    : undefined;
   const retained = next.status === "active" && next.currentPlayer === actorIndex;
+  const matchingCount = actorAfter.hand.filter((card) => card.identityId === identityId).length;
+  const bankHint = matchingCount >= 2
+    ? ` You now hold ${matchingCount} matching Echoes—switch to Bank to secure ${boundValueForCardCount(matchingCount)} ${boundValueForCardCount(matchingCount) === 1 ? "Bound" : "Bounds"}.`
+    : "";
 
-  let kind: TurnOutcome["kind"] = offered.length ? "transfer" : drawn ? "draw" : "empty";
-  let eyebrow = offered.length ? "Echoes revealed" : "Draw from the Veil";
-  let title = offered.length
+  const kind: TurnOutcome["kind"] = offered.length ? "transfer" : drawn ? "draw" : "empty";
+  const eyebrow = offered.length ? "Echoes revealed" : "Draw from the Veil";
+  const title = offered.length
     ? `${offered.length} new ${offered.length === 1 ? "Echo" : "Echoes"}`
     : drawn
       ? `You drew ${getIdentity(drawn.identityId).name}`
-      : "The Veil is empty";
-  let message = offered.length
-    ? `${target.name} surrendered every Echo of ${getIdentity(identityId).name} they held.`
+      : "The Veil turns again";
+  const message = offered.length
+    ? `${target.name} surrendered every Echo of ${getIdentity(identityId).name} they held.${bankHint}`
     : drawn
-      ? `${drawn.echo} has joined your hand.${retained ? " You earned another inquiry." : " Your turn is complete."}`
-      : "No card remains to answer the inquiry.";
-
-  if (bound.length) {
-    kind = "bind";
-    eyebrow = "Identity bound";
-    title = `${identity.name} is complete`;
-    message = `Memory, Desire, Fear, and Truth crossed the threshold and became one revelation.${retained ? " You may inquire again." : ""}`;
-  }
+      ? `${drawn.echo} has joined your hand.${retained ? " You earned another inquiry." : " Your turn is complete."}${drawn.identityId === identityId ? bankHint : ""}`
+      : "A fresh cycle of the Veil is answering the inquiry.";
 
   return {
     id: `${next.id}-${next.turn}-${next.events[0]?.id ?? Date.now()}`,
@@ -263,7 +269,6 @@ function buildLocalOutcome(
     message,
     cards: offered.length ? offered : drawn ? [drawn] : [],
     identityId,
-    bound,
     buttonLabel: outcomeButtonLabel(next.currentPlayer, actorIndex, next.status),
   };
 }
@@ -276,36 +281,31 @@ function buildOnlineOutcome(
 ): TurnOutcome {
   const beforeIds = new Set(before.yourHand.map((card) => card.id));
   const cards = next.yourHand.filter((card) => !beforeIds.has(card.id));
-  const bound = next.players[seat].bound.filter((id) => !before.players[seat].bound.includes(id));
   const opponentSeat = seat === 0 ? 1 : 0;
   const transferred = Math.max(0, before.players[opponentSeat].handCount - next.players[opponentSeat].handCount);
-  const drew = next.deckCount < before.deckCount;
+  const drew = next.veilDraws > before.veilDraws;
   const retained = next.status === "active" && next.currentPlayer === seat;
-  const identity = getIdentity(bound[0] ?? identityId);
+  const matchingCount = next.yourHand.filter((card) => card.identityId === identityId).length;
+  const bankHint = matchingCount >= 2
+    ? ` You now hold ${matchingCount} matching Echoes—Bank them for ${boundValueForCardCount(matchingCount)} ${boundValueForCardCount(matchingCount) === 1 ? "Bound" : "Bounds"}.`
+    : "";
 
-  let kind: TurnOutcome["kind"] = transferred ? "transfer" : drew ? "draw" : "empty";
-  let eyebrow = transferred ? "Echoes revealed" : "Draw from the Veil";
-  let title = transferred
+  const kind: TurnOutcome["kind"] = transferred ? "transfer" : drew ? "draw" : "empty";
+  const eyebrow = transferred ? "Echoes revealed" : "Draw from the Veil";
+  const title = transferred
     ? `${transferred} new ${transferred === 1 ? "Echo" : "Echoes"}`
     : cards[0]
       ? `You drew ${getIdentity(cards[0].identityId).name}`
       : drew
         ? "A new Echo answered"
-        : "The Veil is empty";
-  let message = transferred
-    ? `Every matching ${getIdentity(identityId).name} Echo crossed into your hand.`
+        : "The Veil turns again";
+  const message = transferred
+    ? `Every matching ${getIdentity(identityId).name} Echo crossed into your hand.${bankHint}`
     : cards[0]
-      ? `${cards[0].echo} has joined your hand.${retained ? " You earned another inquiry." : " Your turn is complete."}`
+      ? `${cards[0].echo} has joined your hand.${retained ? " You earned another inquiry." : " Your turn is complete."}${cards[0].identityId === identityId ? bankHint : ""}`
       : retained
         ? "The Veil answered your inquiry. You may ask again."
         : "Your inquiry is complete.";
-
-  if (bound.length) {
-    kind = "bind";
-    eyebrow = "Identity bound";
-    title = `${identity.name} is complete`;
-    message = `All four Echoes crossed the threshold and became one revelation.${retained ? " You may inquire again." : ""}`;
-  }
 
   return {
     id: `${next.id}-${next.turn}-${next.events[0]?.id ?? Date.now()}`,
@@ -315,7 +315,42 @@ function buildOnlineOutcome(
     message,
     cards,
     identityId,
-    bound,
+    buttonLabel: outcomeButtonLabel(next.currentPlayer, seat, next.status),
+  };
+}
+
+function buildBankOutcome(before: GameState, next: GameState, actorIndex: number): TurnOutcome {
+  const priorIds = new Set(before.players[actorIndex].bound.map((entry) => entry.id));
+  const banked = next.players[actorIndex].bound.find((entry) => !priorIds.has(entry.id))!;
+  const score = scorePlayer(next.players[actorIndex]);
+  return {
+    id: `${next.id}-${next.turn}-${banked.id}`,
+    kind: "bank",
+    eyebrow: "Locked into your Bank",
+    title: `+${banked.points} ${banked.points === 1 ? "Bound" : "Bounds"}`,
+    message: `${banked.cards.length} matching Echoes of ${getIdentity(banked.identityId).name} are now safe. You have ${score} of ${WIN_SCORE} Bounds needed to win.`,
+    cards: banked.cards,
+    identityId: banked.identityId,
+    banked,
+    score,
+    buttonLabel: outcomeButtonLabel(next.currentPlayer, actorIndex, next.status),
+  };
+}
+
+function buildOnlineBankOutcome(before: OnlineGameView, next: OnlineGameView, seat: 0 | 1): TurnOutcome {
+  const priorIds = new Set(before.players[seat].bound.map((entry) => entry.id));
+  const banked = next.players[seat].bound.find((entry) => !priorIds.has(entry.id))!;
+  const score = scorePlayer(next.players[seat]);
+  return {
+    id: `${next.id}-${next.turn}-${banked.id}`,
+    kind: "bank",
+    eyebrow: "Locked into your Bank",
+    title: `+${banked.points} ${banked.points === 1 ? "Bound" : "Bounds"}`,
+    message: `${banked.cards.length} matching Echoes are safe in your Bank. You have ${score} of ${WIN_SCORE} Bounds needed to win.`,
+    cards: banked.cards,
+    identityId: banked.identityId,
+    banked,
+    score,
     buttonLabel: outcomeButtonLabel(next.currentPlayer, seat, next.status),
   };
 }
@@ -333,10 +368,16 @@ function TurnResolution({ outcome, continueTurn }: { outcome: TurnOutcome; conti
               <VeilCardView card={card} compact />
             </span>
           )) : (
-            <span className="resolutionIdentity"><IdentityPortrait identityId={outcome.bound[0] ?? outcome.identityId} /></span>
+            <span className="resolutionIdentity"><IdentityPortrait identityId={outcome.identityId} /></span>
           )}
-          {outcome.bound.length > 0 && <span className="bindingMark"><i>✦</i><b>BOUND</b></span>}
+          {outcome.banked && <span className="bindingMark"><i>✦</i><b>BANKED · +{outcome.banked.points}</b></span>}
         </div>
+        {typeof outcome.score === "number" && (
+          <div className="resolutionGoal" aria-label={`${outcome.score} of ${WIN_SCORE} Bounds`}>
+            <span><i style={{ width: `${Math.min(100, (outcome.score / WIN_SCORE) * 100)}%` }} /></span>
+            <b>{outcome.score} / {WIN_SCORE} BOUNDS</b>
+          </div>
+        )}
         <p className="resolutionMessage">{outcome.message}</p>
         <button className="resolutionAction" type="button" onClick={continueTurn}>
           <span>{outcome.buttonLabel}</span><i>→</i>
@@ -355,11 +396,12 @@ function RulesPanel({ close, tutorial }: { close: () => void; tutorial: () => vo
         <h2 id="rules-title">How to play</h2>
         <Ornament />
         <ol className="ruleList">
+          <li><b>Race to seven Bounds</b><span>The familiar 52-card identity deck powers an endless central Veil that reshuffles whenever a cycle runs out.</span></li>
           <li><b>Choose an identity</b><span>You may only inquire after an identity already held in your hand.</span></li>
           <li><b>Inquire of another seeker</b><span>Ask, “Do you hold The Warden?” If they do, every matching echo passes to you.</span></li>
           <li><b>Draw from the Veil</b><span>If they hold none, they answer “Draw from the Veil,” and you draw one card.</span></li>
-          <li><b>Bind four echoes</b><span>Memory, Desire, Fear, and Truth complete an identity. Bound identities are safe and score one point.</span></li>
-          <li><b>Claim the revelation</b><span>When all thirteen identities are bound, the seeker with the most wins.</span></li>
+          <li><b>Lock matching cards</b><span>Switch to Bank and select 2–4 cards of one identity. A pair scores 1 Bound, three score 2, and all four score 3.</span></li>
+          <li><b>Choose safety or reward</b><span>Bank early to protect a pair, or risk holding it while you hunt a larger set. The first seeker to 7 Bounds wins.</span></li>
         </ol>
         <button className="primaryButton" type="button" onClick={tutorial}>Open the guided tutorial</button>
         <button className="ghostButton" type="button" onClick={close}>I understand</button>
@@ -474,7 +516,7 @@ function TitleScreen({
         <button className="secondaryButton" type="button" onClick={onTutorial}>Learn to play</button>
         <button className="ghostButton" type="button" onClick={onChronicle}>Open the chronicle</button>
       </div>
-      <p className="versionStamp">First Edition · 1.2</p>
+      <p className="versionStamp">Second Edition · 2.0</p>
     </section>
   );
 }
@@ -560,11 +602,21 @@ const TUTORIAL_CARD: VeilCard = {
   echo: "Memory",
 };
 
+const TUTORIAL_BANK_CARDS: VeilCard[] = [
+  TUTORIAL_CARD,
+  { id: "tutorial-warden-desire", identityId: "warden", echo: "Desire" },
+];
+
 const TUTORIAL_STEPS = [
   {
     eyebrow: "The objective",
-    title: "Bind hidden identities",
-    body: "The deck holds thirteen masked identities. Every identity has four Echoes—Memory, Desire, Fear, and Truth. Gather all four to bind that identity for one point.",
+    title: "First to seven Bounds wins",
+    body: "Collect matching Echoes, lock them safely into your Bank, and be the first seeker to reach 7 Bounds. Your score is always visible, so every turn has a clear purpose.",
+  },
+  {
+    eyebrow: "The draw pile",
+    title: "The Veil never runs dry",
+    body: "The familiar 52-card identity deck deals a starting hand, while the center acts as an endless draw source. Whenever one cycle empties, the Veil quietly reshuffles a fresh one until somebody reaches 7 Bounds.",
   },
   {
     eyebrow: "Read your hand",
@@ -587,9 +639,14 @@ const TUTORIAL_STEPS = [
     body: "If they hold none, they answer “Draw from the Veil.” You draw one card and the turn usually passes. Draw the exact identity you requested and you earn another inquiry.",
   },
   {
-    eyebrow: "Binding and scoring",
-    title: "Four Echoes become one point",
-    body: "Complete identities bind automatically and leave your hand. Empty hands refill while cards remain. When all thirteen identities are bound, the highest score wins; equal scores share the revelation.",
+    eyebrow: "Try the Bank",
+    title: "Select matching cards together",
+    body: "Switch to Bank, tap 2–4 cards of the same identity, then tap the center to stage them. Locking removes those cards from danger and adds their value to your score.",
+  },
+  {
+    eyebrow: "Risk and reward",
+    title: "Hold longer or lock now",
+    body: "A pair scores 1 Bound, three matching cards score 2, and all four score 3. Bank early for safety, or keep asking while you risk the set for a larger reward. Empty hands draw one new card while the Veil remains.",
   },
   {
     eyebrow: "Choose your circle",
@@ -602,8 +659,11 @@ function TutorialScreen({ back, practice }: { back: () => void; practice: () => 
   const [step, setStep] = useState(0);
   const [selected, setSelected] = useState(false);
   const [prepared, setPrepared] = useState(false);
+  const [bankSelected, setBankSelected] = useState<string[]>([]);
+  const [bankPrepared, setBankPrepared] = useState(false);
   const item = TUTORIAL_STEPS[step];
-  const isGesture = step === 2;
+  const isGesture = step === 3;
+  const isBankGesture = step === 6;
   const last = step === TUTORIAL_STEPS.length - 1;
 
   const selectCard = () => {
@@ -613,10 +673,20 @@ function TutorialScreen({ back, practice }: { back: () => void; practice: () => 
   const prepareCard = () => {
     if (selected) setPrepared(true);
   };
+  const toggleBankCard = (cardId: string) => {
+    setBankPrepared(false);
+    setBankSelected((current) => current.includes(cardId)
+      ? current.filter((id) => id !== cardId)
+      : [...current, cardId]);
+  };
+  const prepareBank = () => {
+    if (bankSelected.length === 2) setBankPrepared(true);
+  };
+  const continueDisabled = (isGesture && !prepared) || (isBankGesture && !bankPrepared);
 
   return (
     <AppPage eyebrow="Guided rite" title="Learn Veilbound" back={back}>
-      <div className="tutorialProgress" aria-label={`Tutorial step ${step + 1} of ${TUTORIAL_STEPS.length}`}>
+      <div className="tutorialProgress" style={{ gridTemplateColumns: `repeat(${TUTORIAL_STEPS.length}, 1fr)` }} aria-label={`Tutorial step ${step + 1} of ${TUTORIAL_STEPS.length}`}>
         {TUTORIAL_STEPS.map((_, index) => <i key={index} className={index <= step ? "active" : ""} />)}
       </div>
       <section className="tutorialCard">
@@ -624,8 +694,9 @@ function TutorialScreen({ back, practice }: { back: () => void; practice: () => 
         <h2>{item.title}</h2>
         <p>{item.body}</p>
         <div className={`tutorialStage stage${step + 1}`}>
-          {step === 0 && <div className="echoSet"><span>Memory</span><span>Desire</span><span>Fear</span><span>Truth</span></div>}
-          {step === 1 && <VeilCardView card={TUTORIAL_CARD} />}
+          {step === 0 && <div className="tutorialGoal"><strong>0</strong><span>{Array.from({ length: WIN_SCORE }, (_, index) => <i key={index} />)}</span><b>7 BOUNDS</b></div>}
+          {step === 1 && <div className="tutorialDeck"><CardBack count="∞" /><span><b>THE ENDLESS VEIL</b><small>Always available when you are denied</small></span></div>}
+          {step === 2 && <VeilCardView card={TUTORIAL_CARD} />}
           {isGesture && (
             <>
               <VeilCardView
@@ -644,17 +715,30 @@ function TutorialScreen({ back, practice }: { back: () => void; practice: () => 
               </button>
             </>
           )}
-          {step === 3 && <div className="tutorialTransfer"><span>1</span><b>→</b><span>3 Echoes</span></div>}
-          {step === 4 && <div className="tutorialPhrase">“Draw from the Veil.”</div>}
-          {step === 5 && <div className="tutorialScore"><Crest small /><strong>+1</strong><span>The Warden bound</span></div>}
-          {step === 6 && <div className="tutorialModes"><span>1–2 bots</span><span>Pass & play</span><span>Private link</span></div>}
+          {step === 4 && <div className="tutorialTransfer"><span>Your Warden</span><b>←</b><span>Every rival Warden</span></div>}
+          {step === 5 && <div className="tutorialPhrase">“Draw from the Veil.”</div>}
+          {isBankGesture && (
+            <div className="tutorialBankPractice">
+              <div className="tutorialBankCards">
+                {TUTORIAL_BANK_CARDS.map((card) => (
+                  <VeilCardView key={card.id} card={card} selected={bankSelected.includes(card.id)} onClick={() => toggleBankCard(card.id)} />
+                ))}
+              </div>
+              <button type="button" className={`tutorialDrop ${bankPrepared ? "prepared" : ""}`} onClick={prepareBank}>
+                <Crest small /><span>{bankPrepared ? "+1 Bound staged" : bankSelected.length === 2 ? "Tap to stage both" : `Select both cards · ${bankSelected.length}/2`}</span>
+              </button>
+            </div>
+          )}
+          {step === 7 && <div className="tutorialTiers"><span><b>2 cards</b><strong>+1</strong></span><span><b>3 cards</b><strong>+2</strong></span><span className="best"><b>4 cards</b><strong>+3</strong></span></div>}
+          {step === 8 && <div className="tutorialModes"><span>1–2 bots</span><span>Pass & play</span><span>Private link</span></div>}
         </div>
         {isGesture && <p className="tutorialHint" aria-live="polite">{prepared ? "Perfect. The card is centered and the Ask button is now ready." : selected ? "Good. Now tap the center seal." : "Step 1: tap The Warden card."}</p>}
+        {isBankGesture && <p className="tutorialHint" aria-live="polite">{bankPrepared ? "Perfect. Locking this pair would add 1 Bound to your Bank." : bankSelected.length === 2 ? "Both match. Now tap the Bank seal." : "Tap both Warden cards to select them together."}</p>}
       </section>
       <div className="tutorialActions">
         {step > 0 && <button className="secondaryButton" type="button" onClick={() => setStep((value) => value - 1)}>Previous</button>}
         {!last && (
-          <button className="primaryButton" type="button" disabled={isGesture && !prepared} onClick={() => setStep((value) => value + 1)}>
+          <button className="primaryButton" type="button" disabled={continueDisabled} onClick={() => setStep((value) => value + 1)}>
             Continue
           </button>
         )}
@@ -798,12 +882,12 @@ function ChronicleScreen({ stats, back }: { stats: Chronicle; back: () => void }
   const winRate = stats.games ? Math.round((stats.wins / stats.games) * 100) : 0;
   return (
     <AppPage eyebrow="Your record" title="The chronicle" back={back}>
-      <div className="chronicleSeal"><Crest /><span>{stats.bestScore}</span><small>best revelation</small></div>
+      <div className="chronicleSeal"><Crest /><span>{stats.bestScore}</span><small>best Bound score</small></div>
       <div className="statGrid">
         <article><strong>{stats.games}</strong><span>rites completed</span></article>
         <article><strong>{stats.wins}</strong><span>victories</span></article>
         <article><strong>{winRate}%</strong><span>win rate</span></article>
-        <article><strong>{stats.identitiesBound}</strong><span>identities bound</span></article>
+        <article><strong>{stats.identitiesBound}</strong><span>Bounds banked</span></article>
       </div>
       <blockquote>“A name remembered is a door left open.”</blockquote>
       <p className="finePrint">The chronicle is kept only on this device.</p>
@@ -823,7 +907,7 @@ function OpponentMedallion({
     name: string;
     hand?: VeilCard[];
     handCount?: number;
-    bound: IdentityId[];
+    bound: BankedBound[];
   };
   active: boolean;
   target: boolean;
@@ -831,6 +915,7 @@ function OpponentMedallion({
   onClick: () => void;
 }) {
   const portraitId = IDENTITIES[(Number(player.id.split("-")[1]) * 3) % IDENTITIES.length].id;
+  const score = scorePlayer(player);
   return (
     <button
       type="button"
@@ -841,21 +926,69 @@ function OpponentMedallion({
     >
       <span className="medallion"><IdentityPortrait identityId={portraitId} /></span>
       <strong>{player.name}</strong>
-      <span className="opponentCounts"><i>{player.handCount ?? player.hand?.length ?? 0} cards</i><i>{player.bound.length} bound</i></span>
+      <span className="opponentCounts"><i>{player.handCount ?? player.hand?.length ?? 0} cards</i><i>{score}/{WIN_SCORE} Bounds</i></span>
     </button>
   );
 }
 
-function BoundRow({ player }: { player: { name: string; bound: IdentityId[] } }) {
+function ScoreTrack({ score, compact = false }: { score: number; compact?: boolean }) {
   return (
-    <div className="boundRow" aria-label={`${player.name === "You" ? "You have" : `${player.name} has`} ${player.bound.length} bound identities`}>
+    <span className={`scoreTrack ${compact ? "compact" : ""}`} aria-label={`${score} of ${WIN_SCORE} Bounds`}>
+      {Array.from({ length: WIN_SCORE }, (_, index) => <i key={index} className={index < score ? "filled" : ""} />)}
+    </span>
+  );
+}
+
+function BoundRow({ player }: { player: { name: string; bound: BankedBound[] } }) {
+  const score = scorePlayer(player);
+  return (
+    <div className="boundRow" aria-label={`${player.name === "You" ? "You have" : `${player.name} has`} ${score} of ${WIN_SCORE} Bounds`}>
       {player.bound.length === 0 ? (
-        <span className="emptyBound">No identities bound</span>
+        <span className="emptyBound">Bank empty</span>
       ) : (
-        player.bound.map((identityId) => (
-          <span key={identityId} title={getIdentity(identityId).name}><IdentityPortrait identityId={identityId} /></span>
+        player.bound.map((entry) => (
+          <span key={entry.id} title={`${getIdentity(entry.identityId).name} · ${entry.points} ${entry.points === 1 ? "Bound" : "Bounds"}`}>
+            <IdentityPortrait identityId={entry.identityId} /><b>+{entry.points}</b>
+          </span>
         ))
       )}
+    </div>
+  );
+}
+
+function GroupedHand({
+  cards,
+  selectedIds,
+  newCardIds,
+  onSelect,
+}: {
+  cards: VeilCard[];
+  selectedIds: string[];
+  newCardIds: string[];
+  onSelect?: (card: VeilCard) => void;
+}) {
+  const groups = IDENTITIES.map((identity) => ({
+    identity,
+    cards: sortHand(cards.filter((card) => card.identityId === identity.id)),
+  })).filter((group) => group.cards.length > 0);
+  return (
+    <div className="groupedHand" role="list" aria-label="Cards grouped by identity">
+      {groups.map((group) => (
+        <section className={`handGroup ${group.cards.length >= 2 ? "bankable" : ""}`} key={group.identity.id} role="listitem">
+          <header><b>{group.identity.name.replace("The ", "")}</b><span>{group.cards.length}/4</span></header>
+          <div className="handGroupCards">
+            {group.cards.map((card) => (
+              <VeilCardView
+                key={card.id}
+                card={card}
+                selected={selectedIds.includes(card.id)}
+                entering={newCardIds.includes(card.id)}
+                onClick={onSelect ? () => onSelect(card) : undefined}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
@@ -932,7 +1065,7 @@ function Results({
   rematch: () => void;
   title: () => void;
 }) {
-  const sorted = [...game.players].sort((a, b) => b.bound.length - a.bound.length);
+  const sorted = [...game.players].sort((a, b) => scorePlayer(b) - scorePlayer(a));
   const isTie = game.winnerIds.length > 1;
   return (
     <div className="modalScrim resultScrim" role="dialog" aria-modal="true" aria-labelledby="result-title">
@@ -941,11 +1074,11 @@ function Results({
         <Crest />
         <p className="eyebrow">The final revelation</p>
         <h2 id="result-title">{isTie ? "The circle is divided" : sorted[0]?.name === "You" ? "You prevail" : `${sorted[0]?.name} prevails`}</h2>
-        <p className="resultLead">{isTie ? "Two wills leave the Veil in perfect balance." : "The greatest collection of hidden identities has been bound."}</p>
+        <p className="resultLead">{isTie ? "Two wills leave the Veil in perfect balance." : `The race to ${WIN_SCORE} Bounds is complete.`}</p>
         <div className="scoreList">
           {sorted.map((player, index) => (
             <article key={player.id} className={game.winnerIds.includes(player.id) ? "winner" : ""}>
-              <span>{index + 1}</span><b>{player.name}</b><strong>{player.bound.length}</strong><small>bound</small>
+              <span>{index + 1}</span><b>{player.name}</b><strong>{scorePlayer(player)}</strong><small>Bounds</small>
             </article>
           ))}
         </div>
@@ -955,6 +1088,8 @@ function Results({
     </div>
   );
 }
+
+type TurnMode = "ask" | "bank";
 
 function GameTable({
   game,
@@ -973,8 +1108,9 @@ function GameTable({
   const viewer = game.mode === "solo"
     ? (game.players.find((player) => player.kind === "human") ?? actor)
     : actor;
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
-  const [placedCardId, setPlacedCardId] = useState<string | null>(null);
+  const [turnMode, setTurnMode] = useState<TurnMode>("ask");
+  const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
+  const [staged, setStaged] = useState(false);
   const [selectionTurn, setSelectionTurn] = useState(game.turn);
   const [targetId, setTargetId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -990,11 +1126,22 @@ function GameTable({
     ? game.players.filter((player) => player.kind === "ai")
     : game.players.filter((player) => player.id !== actor.id);
   const selectionIsCurrent = selectionTurn === game.turn && actor.id === viewer.id;
-  const selectedCard = selectionIsCurrent ? viewer.hand.find((card) => card.id === selectedCardId) ?? null : null;
-  const placedCard = selectionIsCurrent ? viewer.hand.find((card) => card.id === placedCardId) ?? null : null;
-  const effectiveIdentity = placedCard && validIdentities.includes(placedCard.identityId)
-    ? placedCard.identityId
-    : null;
+  const selectedCards = selectionIsCurrent
+    ? selectedCardIds
+        .map((cardId) => viewer.hand.find((card) => card.id === cardId))
+        .filter((card): card is VeilCard => Boolean(card))
+    : [];
+  const selectedIdentity = selectedCards[0]?.identityId ?? null;
+  const bankSelectionValid = selectedCards.length >= 2
+    && selectedCards.length <= 4
+    && selectedCards.every((card) => card.identityId === selectedIdentity);
+  const bankValue = bankSelectionValid ? boundValueForCardCount(selectedCards.length) : 0;
+  const effectiveIdentity = turnMode === "ask"
+    && staged
+    && selectedCards.length === 1
+    && validIdentities.includes(selectedCards[0].identityId)
+      ? selectedCards[0].identityId
+      : null;
   const effectiveTarget = targets.some((player) => player.id === targetId)
     ? targetId
     : (targets[0]?.id ?? "");
@@ -1004,6 +1151,8 @@ function GameTable({
     && !busy
     && !pendingGame
     && game.status === "active";
+  const viewerScore = scorePlayer(viewer);
+  const bankableCount = bankableGroups(viewer).length;
 
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -1015,19 +1164,42 @@ function GameTable({
     tone(settings.sound, "tap");
     haptic(settings.haptics, 8);
     setSelectionTurn(game.turn);
-    setSelectedCardId(card.id);
-    setPlacedCardId(null);
+    setStaged(false);
+    if (turnMode === "ask") {
+      setSelectedCardIds([card.id]);
+      return;
+    }
+    setSelectedCardIds((current) => {
+      if (current.includes(card.id)) return current.filter((id) => id !== card.id);
+      const currentCards = current
+        .map((id) => viewer.hand.find((item) => item.id === id))
+        .filter((item): item is VeilCard => Boolean(item));
+      if (!currentCards.length || (currentCards[0].identityId === card.identityId && current.length < 4)) {
+        return [...current, card.id];
+      }
+      return [card.id];
+    });
   };
 
-  const placeCard = () => {
-    if (!canAct || !selectedCard) return;
+  const chooseMode = (mode: TurnMode) => {
+    if (!canAct) return;
+    tone(settings.sound, "tap");
+    setTurnMode(mode);
+    setSelectedCardIds([]);
+    setStaged(false);
+    setSelectionTurn(game.turn);
+  };
+
+  const stageCards = () => {
+    const canStage = turnMode === "ask" ? selectedCards.length === 1 : bankSelectionValid;
+    if (!canAct || !canStage) return;
     tone(settings.sound, "reveal");
     haptic(settings.haptics, [8, 24, 12]);
-    setPlacedCardId((current) => current === selectedCard.id ? null : selectedCard.id);
+    setStaged((current) => !current);
   };
 
   const inquire = () => {
-    if (!canAct || !effectiveIdentity || !effectiveTarget || !placedCard) return;
+    if (!canAct || turnMode !== "ask" || !effectiveIdentity || !effectiveTarget || !staged) return;
     tone(settings.sound, "tap");
     haptic(settings.haptics);
     setBusy(true);
@@ -1052,6 +1224,34 @@ function GameTable({
     }, settings.reducedMotion ? 80 : 420);
   };
 
+  const lockBank = () => {
+    if (!canAct || turnMode !== "bank" || !staged || !bankSelectionValid) return;
+    tone(settings.sound, "tap");
+    haptic(settings.haptics, [12, 24, 12]);
+    setBusy(true);
+    const beforePlayer = game.currentPlayer;
+    timerRef.current = setTimeout(() => {
+      const next = resolveBank(game, {
+        actorId: actor.id,
+        cardIds: selectedCards.map((card) => card.id),
+      });
+      if (next === game) {
+        setBusy(false);
+        return;
+      }
+      const beforeIds = new Set(game.players[beforePlayer].hand.map((card) => card.id));
+      const enteringIds = next.players[beforePlayer].hand
+        .filter((card) => !beforeIds.has(card.id))
+        .map((card) => card.id);
+      tone(settings.sound, "bind");
+      haptic(settings.haptics, [18, 34, 20, 44, 24]);
+      setPendingGame(next);
+      setPendingNewCardIds(enteringIds);
+      setOutcome(buildBankOutcome(game, next, beforePlayer));
+      setBusy(false);
+    }, settings.reducedMotion ? 80 : 420);
+  };
+
   const continueTurn = () => {
     if (!pendingGame) return;
     const beforePlayer = game.currentPlayer;
@@ -1060,8 +1260,9 @@ function GameTable({
     setPendingGame(null);
     setPendingNewCardIds([]);
     setOutcome(null);
-    setSelectedCardId(null);
-    setPlacedCardId(null);
+    setSelectedCardIds([]);
+    setStaged(false);
+    setTurnMode("ask");
     if (entryTimerRef.current) clearTimeout(entryTimerRef.current);
     entryTimerRef.current = setTimeout(
       () => setNewCardIds([]),
@@ -1069,16 +1270,35 @@ function GameTable({
     );
   };
 
-  const sortedHand = sortHand(viewer.hand);
-  const selected = selectedCard ? getIdentity(selectedCard.identityId) : null;
-  const placed = placedCard ? getIdentity(placedCard.identityId) : null;
+  const selected = selectedIdentity ? getIdentity(selectedIdentity) : null;
   const turnInstruction = !canAct
-    ? actor.kind === "ai" ? `${actor.name} is considering the table` : `Waiting for ${actor.name}`
-    : !selectedCard
-      ? "Step 1 · Tap a card in your hand"
-      : !placedCard
-        ? `Step 2 · Tap the center to place ${selected?.name}`
-        : `Step 3 · Ask ${target?.name ?? "a seeker"}`;
+    ? actor.kind === "ai" ? actor.name + " is considering the table" : "Waiting for " + actor.name
+    : turnMode === "ask"
+      ? selectedCards.length === 0
+        ? "Choose one identity from your hand"
+        : !staged
+          ? "Tap the center to stage " + selected?.name
+          : "Ready to ask " + (target?.name ?? "a seeker")
+      : selectedCards.length === 0
+        ? "Select 2–4 matching cards"
+        : !bankSelectionValid
+          ? "Select at least one more " + selected?.name + " card"
+          : !staged
+            ? "Stage " + selectedCards.length + " cards worth " + bankValue + (bankValue === 1 ? " Bound" : " Bounds")
+            : "Ready to lock +" + bankValue + (bankValue === 1 ? " Bound" : " Bounds");
+  const mainAction = turnMode === "ask" ? inquire : lockBank;
+  const mainActionDisabled = turnMode === "ask"
+    ? !canAct || !effectiveIdentity || !effectiveTarget || !staged
+    : !canAct || !bankSelectionValid || !staged;
+  const mainActionLabel = busy
+    ? turnMode === "ask" ? "REVEALING…" : "LOCKING…"
+    : staged
+      ? turnMode === "ask"
+        ? "ASK " + (target?.name?.toUpperCase() ?? "NOW")
+        : "LOCK · +" + bankValue + (bankValue === 1 ? " BOUND" : " BOUNDS")
+      : selectedCards.length
+        ? "STAGE IN CENTER"
+        : turnMode === "ask" ? "CHOOSE A CARD" : "SELECT A SET";
 
   return (
     <>
@@ -1088,6 +1308,11 @@ function GameTable({
           <div className="gameWordmark"><Crest small /><span><b>VEILBOUND</b><small>Turn {game.turn}</small></span></div>
           <IconButton label="Open turn history" onClick={openHistory}>⌛</IconButton>
         </header>
+
+        <div className="goalStrip">
+          <span>FIRST TO {WIN_SCORE}</span>
+          <div><b>{viewerScore}</b><ScoreTrack score={viewerScore} /><small>Bounds</small></div>
+        </div>
 
         <div className="opponents" data-count={targets.length}>
           {displayedOpponents.map((player) => (
@@ -1104,61 +1329,69 @@ function GameTable({
 
         <div key={game.events[0]?.id ?? "opening"} className="messageRibbon eventRibbon" aria-live="polite">
           <i className="ribbonFlourish" aria-hidden="true" />
-          <p>{busy ? `${actor.name} reaches toward the Veil…` : game.lastMessage}</p>
+          <p>{busy ? actor.name + " reaches toward the Veil…" : game.lastMessage}</p>
         </div>
 
         <div className="tableCenter">
           <div className="boundSummary">
-            <span>{viewer.name}</span>
+            <span>{viewer.name === "You" ? "Your Bank" : viewer.name + "’s Bank"} · {viewerScore}/{WIN_SCORE}</span>
+            <ScoreTrack score={viewerScore} compact />
             <BoundRow player={viewer} />
           </div>
           <button
-            className={`centerSeal ${selectedCard ? "readyToPlace" : ""} ${placedCard ? "placed" : ""}`}
+            className={"centerSeal " + (selectedCards.length ? "readyToPlace " : "") + (staged ? "placed " : "") + (turnMode === "bank" ? "bankSeal" : "")}
             type="button"
-            onClick={placeCard}
-            disabled={!canAct || !selectedCard}
-            aria-label={placedCard ? `Remove ${placed?.name} from the center` : selectedCard ? `Place ${selected?.name} in the center` : "Select a card first"}
+            onClick={stageCards}
+            disabled={!canAct || (turnMode === "ask" ? selectedCards.length !== 1 : !bankSelectionValid)}
+            aria-label={staged ? "Remove staged cards from the center" : selectedCards.length ? "Stage selected cards" : "Select cards first"}
           >
             <span className="centerSealGlow" />
-            {placedCard ? <VeilCardView card={placedCard} compact /> : <Crest small />}
-            <small>{placedCard ? `${placed?.name} placed` : selectedCard ? `Tap to place ${selected?.name}` : "Select a card below"}</small>
+            {staged ? (
+              <span className={"centerCardStack cards" + selectedCards.length}>
+                {selectedCards.map((card) => <VeilCardView key={card.id} card={card} compact />)}
+              </span>
+            ) : <Crest small />}
+            <small>{staged
+              ? turnMode === "bank" ? selectedCards.length + " cards · +" + bankValue : selected?.name + " staged"
+              : selectedCards.length ? "Tap to stage" : turnMode === "bank" ? "Select a matching set" : "Select a card below"}</small>
           </button>
-          <button key={game.deck.length} className="deckButton deckChanged" type="button" aria-label={`${game.deck.length} cards remain in the Veil`} disabled>
+          <button key={game.veilDraws} className="deckButton deckChanged" type="button" aria-label="The endless Veil draw source" disabled>
             <span className="deckHalo" />
-            <CardBack count={game.deck.length} />
-            <small>The Veil</small>
+            <CardBack count="∞" />
+            <small>The Endless Veil<em>Draw source</em></small>
           </button>
         </div>
 
-        <div className={`handPanel ${settings.largeCards ? "largeCards" : ""}`}>
+        <div className={"handPanel " + (settings.largeCards ? "largeCards" : "")}>
           <div className="handHeader">
-            <span><b>{viewer.name === "You" ? "Your hand" : `${viewer.name}’s hand`}</b><small>{viewer.hand.length} echoes</small></span>
-            <span className="scorePill">{viewer.bound.length} bound</span>
+            <span><b>{viewer.name === "You" ? "Your hand" : viewer.name + "’s hand"}</b><small>{viewer.hand.length} echoes · grouped by identity</small></span>
+            <span className="scorePill">{viewerScore}/{WIN_SCORE} Bounds</span>
+          </div>
+          <div className="actionTabs" role="tablist" aria-label="Choose a turn action">
+            <button type="button" role="tab" aria-selected={turnMode === "ask"} className={turnMode === "ask" ? "active" : ""} onClick={() => chooseMode("ask")} disabled={!canAct}>Ask</button>
+            <button type="button" role="tab" aria-selected={turnMode === "bank"} className={turnMode === "bank" ? "active" : ""} onClick={() => chooseMode("bank")} disabled={!canAct}>Bank {bankableCount > 0 && <i>{bankableCount}</i>}</button>
           </div>
           <div className="turnSteps" aria-label="Turn steps">
-            <span className={selectedCard ? "done" : "active"}><i>1</i>Tap card</span>
-            <span className={placedCard ? "done" : selectedCard ? "active" : ""}><i>2</i>Tap center</span>
-            <span className={placedCard ? "active" : ""}><i>3</i>Ask</span>
+            <span className={selectedCards.length ? "done" : "active"}><i>1</i>{turnMode === "ask" ? "Choose" : "Select set"}</span>
+            <span className={staged ? "done" : selectedCards.length ? "active" : ""}><i>2</i>Stage</span>
+            <span className={staged ? "active" : ""}><i>3</i>{turnMode === "ask" ? "Ask" : "Lock"}</span>
           </div>
-          <div className="cardFan" role="list" aria-label={viewer.name === "You" ? "Your cards" : `${viewer.name}’s cards`}>
-            {sortedHand.map((card) => (
-              <VeilCardView
-                key={card.id}
-                card={card}
-                selected={selectedCard?.id === card.id}
-                entering={newCardIds.includes(card.id)}
-                onClick={canAct ? () => chooseCard(card) : undefined}
-              />
-            ))}
-          </div>
+          <GroupedHand
+            cards={viewer.hand}
+            selectedIds={selectedCards.map((card) => card.id)}
+            newCardIds={newCardIds}
+            onSelect={canAct ? chooseCard : undefined}
+          />
 
           <div className="inquiryBar">
             <div className="inquiryChoice">
               <small>{turnInstruction}</small>
-              <strong>{placed?.name ?? selected?.name ?? "Choose an Echo"}</strong>
+              <strong>{turnMode === "bank"
+                ? selectedCards.length ? selected?.name + " · " + selectedCards.length + "/4" : "Build a matching set"
+                : selected?.name ?? "Choose an Echo"}</strong>
             </div>
-            <button className="inquireButton" type="button" onClick={inquire} disabled={!canAct || !effectiveIdentity || !effectiveTarget || !placedCard}>
-              <span>{busy ? "REVEALING…" : placedCard ? `ASK ${target?.name?.toUpperCase() ?? "NOW"}` : selectedCard ? "PLACE IN CENTER" : "CHOOSE A CARD"}</span>
+            <button className={"inquireButton " + (turnMode === "bank" ? "bankAction" : "")} type="button" onClick={mainAction} disabled={mainActionDisabled}>
+              <span>{mainActionLabel}</span>
               <i>✦</i>
             </button>
           </div>
@@ -1180,7 +1413,7 @@ function OnlineResults({
   rematch: () => void;
   title: () => void;
 }) {
-  const sorted = [...game.players].sort((a, b) => b.bound.length - a.bound.length);
+  const sorted = [...game.players].sort((a, b) => scorePlayer(b) - scorePlayer(a));
   const you = game.players[seat];
   const isTie = game.winnerIds.length > 1;
   const youWon = game.winnerIds.includes(you.id);
@@ -1191,11 +1424,11 @@ function OnlineResults({
         <Crest />
         <p className="eyebrow">The final revelation</p>
         <h2 id="online-result-title">{isTie ? "The circle is divided" : youWon ? "You prevail" : `${sorted[0]?.name} prevails`}</h2>
-        <p className="resultLead">{isTie ? "Two wills leave the Veil in perfect balance." : "Both devices have witnessed the final binding."}</p>
+        <p className="resultLead">{isTie ? "Two wills leave the Veil in perfect balance." : `Both devices witnessed the race to ${WIN_SCORE} Bounds.`}</p>
         <div className="scoreList">
           {sorted.map((player, index) => (
             <article key={player.id} className={game.winnerIds.includes(player.id) ? "winner" : ""}>
-              <span>{index + 1}</span><b>{player.id === you.id ? `${player.name} · You` : player.name}</b><strong>{player.bound.length}</strong><small>bound</small>
+              <span>{index + 1}</span><b>{player.id === you.id ? `${player.name} · You` : player.name}</b><strong>{scorePlayer(player)}</strong><small>Bounds</small>
             </article>
           ))}
         </div>
@@ -1225,8 +1458,9 @@ function OnlineGameTable({
   const you = game.players[room.seat];
   const opponent = game.players[room.seat === 0 ? 1 : 0];
   const actor = game.players[game.currentPlayer];
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
-  const [placedCardId, setPlacedCardId] = useState<string | null>(null);
+  const [turnMode, setTurnMode] = useState<TurnMode>("ask");
+  const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
+  const [staged, setStaged] = useState(false);
   const [selectionTurn, setSelectionTurn] = useState(game.turn);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<TurnOutcome | null>(null);
@@ -1234,12 +1468,23 @@ function OnlineGameTable({
   const [newCardIds, setNewCardIds] = useState<string[]>([]);
   const entryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectionIsCurrent = selectionTurn === game.turn && game.currentPlayer === room.seat;
-  const selectedCard = selectionIsCurrent ? game.yourHand.find((card) => card.id === selectedCardId) ?? null : null;
-  const placedCard = selectionIsCurrent ? game.yourHand.find((card) => card.id === placedCardId) ?? null : null;
-  const effectiveIdentity = placedCard?.identityId ?? null;
-  const selected = selectedCard ? getIdentity(selectedCard.identityId) : null;
-  const placed = placedCard ? getIdentity(placedCard.identityId) : null;
+  const selectedCards = selectionIsCurrent
+    ? selectedCardIds
+        .map((cardId) => game.yourHand.find((card) => card.id === cardId))
+        .filter((card): card is VeilCard => Boolean(card))
+    : [];
+  const selectedIdentity = selectedCards[0]?.identityId ?? null;
+  const selected = selectedIdentity ? getIdentity(selectedIdentity) : null;
+  const bankSelectionValid = selectedCards.length >= 2
+    && selectedCards.length <= 4
+    && selectedCards.every((card) => card.identityId === selectedIdentity);
+  const bankValue = bankSelectionValid ? boundValueForCardCount(selectedCards.length) : 0;
+  const effectiveIdentity = turnMode === "ask" && staged && selectedCards.length === 1
+    ? selectedCards[0].identityId
+    : null;
   const canAct = game.status === "active" && game.currentPlayer === room.seat && !busy && !outcome;
+  const yourScore = scorePlayer(you);
+  const bankableCount = bankableGroups({ hand: game.yourHand }).length;
 
   useEffect(() => () => {
     if (entryTimerRef.current) clearTimeout(entryTimerRef.current);
@@ -1250,19 +1495,42 @@ function OnlineGameTable({
     tone(settings.sound, "tap");
     haptic(settings.haptics, 8);
     setSelectionTurn(game.turn);
-    setSelectedCardId(card.id);
-    setPlacedCardId(null);
+    setStaged(false);
+    if (turnMode === "ask") {
+      setSelectedCardIds([card.id]);
+      return;
+    }
+    setSelectedCardIds((current) => {
+      if (current.includes(card.id)) return current.filter((id) => id !== card.id);
+      const currentCards = current
+        .map((id) => game.yourHand.find((item) => item.id === id))
+        .filter((item): item is VeilCard => Boolean(item));
+      if (!currentCards.length || (currentCards[0].identityId === card.identityId && current.length < 4)) {
+        return [...current, card.id];
+      }
+      return [card.id];
+    });
   };
 
-  const placeCard = () => {
-    if (!canAct || !selectedCard) return;
+  const chooseMode = (mode: TurnMode) => {
+    if (!canAct) return;
+    tone(settings.sound, "tap");
+    setTurnMode(mode);
+    setSelectedCardIds([]);
+    setStaged(false);
+    setSelectionTurn(game.turn);
+  };
+
+  const stageCards = () => {
+    const canStage = turnMode === "ask" ? selectedCards.length === 1 : bankSelectionValid;
+    if (!canAct || !canStage) return;
     tone(settings.sound, "reveal");
     haptic(settings.haptics, [8, 24, 12]);
-    setPlacedCardId((current) => current === selectedCard.id ? null : selectedCard.id);
+    setStaged((current) => !current);
   };
 
   const inquire = async () => {
-    if (!canAct || !effectiveIdentity || !opponent || !placedCard) return;
+    if (!canAct || turnMode !== "ask" || !effectiveIdentity || !opponent || !staged) return;
     setBusy(true);
     tone(settings.sound, "tap");
     haptic(settings.haptics);
@@ -1283,12 +1551,36 @@ function OnlineGameTable({
     }
   };
 
+  const lockBank = async () => {
+    if (!canAct || turnMode !== "bank" || !bankSelectionValid || !staged) return;
+    setBusy(true);
+    tone(settings.sound, "tap");
+    haptic(settings.haptics, [12, 24, 12]);
+    try {
+      const nextRoom = await act({
+        type: "bank",
+        version: room.version,
+        cardIds: selectedCards.map((card) => card.id),
+      });
+      if (nextRoom?.game) {
+        const beforeIds = new Set(game.yourHand.map((card) => card.id));
+        setPendingNewCardIds(nextRoom.game.yourHand.filter((card) => !beforeIds.has(card.id)).map((card) => card.id));
+        setOutcome(buildOnlineBankOutcome(game, nextRoom.game, room.seat));
+        tone(settings.sound, "bind");
+        haptic(settings.haptics, [18, 34, 20, 44, 24]);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const continueTurn = () => {
     setNewCardIds(pendingNewCardIds);
     setPendingNewCardIds([]);
     setOutcome(null);
-    setSelectedCardId(null);
-    setPlacedCardId(null);
+    setSelectedCardIds([]);
+    setStaged(false);
+    setTurnMode("ask");
     if (entryTimerRef.current) clearTimeout(entryTimerRef.current);
     entryTimerRef.current = setTimeout(
       () => setNewCardIds([]),
@@ -1297,12 +1589,33 @@ function OnlineGameTable({
   };
 
   const turnInstruction = !canAct
-    ? game.currentPlayer !== room.seat ? `Waiting for ${actor.name}` : "The Veil is resolving your inquiry"
-    : !selectedCard
-      ? "Step 1 · Tap a card in your hand"
-      : !placedCard
-        ? `Step 2 · Tap the center to place ${selected?.name}`
-        : `Step 3 · Ask ${opponent.name}`;
+    ? game.currentPlayer !== room.seat ? "Waiting for " + actor.name : "The Veil is resolving your choice"
+    : turnMode === "ask"
+      ? selectedCards.length === 0
+        ? "Choose one identity from your hand"
+        : !staged ? "Tap the center to stage " + selected?.name : "Ready to ask " + opponent.name
+      : selectedCards.length === 0
+        ? "Select 2–4 matching cards"
+        : !bankSelectionValid
+          ? "Select at least one more " + selected?.name + " card"
+          : !staged
+            ? "Stage " + selectedCards.length + " cards worth " + bankValue + (bankValue === 1 ? " Bound" : " Bounds")
+            : "Ready to lock +" + bankValue + (bankValue === 1 ? " Bound" : " Bounds");
+  const mainAction = turnMode === "ask" ? inquire : lockBank;
+  const mainActionDisabled = turnMode === "ask"
+    ? !canAct || !effectiveIdentity || !staged
+    : !canAct || !bankSelectionValid || !staged;
+  const mainActionLabel = busy
+    ? turnMode === "ask" ? "REVEALING…" : "LOCKING…"
+    : staged
+      ? turnMode === "ask"
+        ? "ASK " + opponent.name.toUpperCase()
+        : "LOCK · +" + bankValue + (bankValue === 1 ? " BOUND" : " BOUNDS")
+      : selectedCards.length
+        ? "STAGE IN CENTER"
+        : game.currentPlayer === room.seat
+          ? turnMode === "ask" ? "CHOOSE A CARD" : "SELECT A SET"
+          : "WAITING…";
 
   return (
     <>
@@ -1314,6 +1627,10 @@ function OnlineGameTable({
         </header>
 
         <div className="onlineStatus"><i className="connectedDot" />Private room {room.id} · synchronized</div>
+        <div className="goalStrip">
+          <span>FIRST TO {WIN_SCORE}</span>
+          <div><b>{yourScore}</b><ScoreTrack score={yourScore} /><small>Bounds</small></div>
+        </div>
         <div className="opponents" data-count="1">
           <OpponentMedallion
             player={opponent}
@@ -1326,62 +1643,70 @@ function OnlineGameTable({
 
         <div key={game.events[0]?.id ?? "opening"} className="messageRibbon eventRibbon" aria-live="polite">
           <i className="ribbonFlourish" aria-hidden="true" />
-          <p>{busy ? "Your inquiry crosses the Veil…" : game.currentPlayer !== room.seat && game.status === "active" ? `${actor.name} is choosing an inquiry…` : game.lastMessage}</p>
+          <p>{busy ? "Your choice crosses the Veil…" : game.currentPlayer !== room.seat && game.status === "active" ? actor.name + " is choosing…" : game.lastMessage}</p>
         </div>
         {error && <div className="onlineToast" role="status">{error}</div>}
 
         <div className="tableCenter">
           <div className="boundSummary">
-            <span>Your bindings</span>
+            <span>Your Bank · {yourScore}/{WIN_SCORE}</span>
+            <ScoreTrack score={yourScore} compact />
             <BoundRow player={you} />
           </div>
           <button
-            className={`centerSeal ${selectedCard ? "readyToPlace" : ""} ${placedCard ? "placed" : ""}`}
+            className={"centerSeal " + (selectedCards.length ? "readyToPlace " : "") + (staged ? "placed " : "") + (turnMode === "bank" ? "bankSeal" : "")}
             type="button"
-            onClick={placeCard}
-            disabled={!canAct || !selectedCard}
-            aria-label={placedCard ? `Remove ${placed?.name} from the center` : selectedCard ? `Place ${selected?.name} in the center` : "Select a card first"}
+            onClick={stageCards}
+            disabled={!canAct || (turnMode === "ask" ? selectedCards.length !== 1 : !bankSelectionValid)}
+            aria-label={staged ? "Remove staged cards from the center" : selectedCards.length ? "Stage selected cards" : "Select cards first"}
           >
             <span className="centerSealGlow" />
-            {placedCard ? <VeilCardView card={placedCard} compact /> : <Crest small />}
-            <small>{placedCard ? `${placed?.name} placed` : selectedCard ? `Tap to place ${selected?.name}` : "Select a card below"}</small>
+            {staged ? (
+              <span className={"centerCardStack cards" + selectedCards.length}>
+                {selectedCards.map((card) => <VeilCardView key={card.id} card={card} compact />)}
+              </span>
+            ) : <Crest small />}
+            <small>{staged
+              ? turnMode === "bank" ? selectedCards.length + " cards · +" + bankValue : selected?.name + " staged"
+              : selectedCards.length ? "Tap to stage" : turnMode === "bank" ? "Select a matching set" : "Select a card below"}</small>
           </button>
-          <button key={game.deckCount} className="deckButton deckChanged" type="button" aria-label={`${game.deckCount} cards remain in the Veil`} disabled>
+          <button key={game.veilDraws} className="deckButton deckChanged" type="button" aria-label="The endless Veil draw source" disabled>
             <span className="deckHalo" />
-            <CardBack count={game.deckCount} />
-            <small>The Veil</small>
+            <CardBack count="∞" />
+            <small>The Endless Veil<em>Draw source</em></small>
           </button>
         </div>
 
-        <div className={`handPanel ${settings.largeCards ? "largeCards" : ""}`}>
+        <div className={"handPanel " + (settings.largeCards ? "largeCards" : "")}>
           <div className="handHeader">
-            <span><b>Your hand</b><small>{game.yourHand.length} private echoes</small></span>
-            <span className="scorePill">{you.bound.length} bound</span>
+            <span><b>Your hand</b><small>{game.yourHand.length} private echoes · grouped</small></span>
+            <span className="scorePill">{yourScore}/{WIN_SCORE} Bounds</span>
+          </div>
+          <div className="actionTabs" role="tablist" aria-label="Choose a turn action">
+            <button type="button" role="tab" aria-selected={turnMode === "ask"} className={turnMode === "ask" ? "active" : ""} onClick={() => chooseMode("ask")} disabled={!canAct}>Ask</button>
+            <button type="button" role="tab" aria-selected={turnMode === "bank"} className={turnMode === "bank" ? "active" : ""} onClick={() => chooseMode("bank")} disabled={!canAct}>Bank {bankableCount > 0 && <i>{bankableCount}</i>}</button>
           </div>
           <div className="turnSteps" aria-label="Turn steps">
-            <span className={selectedCard ? "done" : "active"}><i>1</i>Tap card</span>
-            <span className={placedCard ? "done" : selectedCard ? "active" : ""}><i>2</i>Tap center</span>
-            <span className={placedCard ? "active" : ""}><i>3</i>Ask</span>
+            <span className={selectedCards.length ? "done" : "active"}><i>1</i>{turnMode === "ask" ? "Choose" : "Select set"}</span>
+            <span className={staged ? "done" : selectedCards.length ? "active" : ""}><i>2</i>Stage</span>
+            <span className={staged ? "active" : ""}><i>3</i>{turnMode === "ask" ? "Ask" : "Lock"}</span>
           </div>
-          <div className="cardFan" role="list" aria-label="Your private cards">
-            {sortHand(game.yourHand).map((card) => (
-              <VeilCardView
-                key={card.id}
-                card={card}
-                selected={selectedCard?.id === card.id}
-                entering={newCardIds.includes(card.id)}
-                onClick={canAct ? () => chooseCard(card) : undefined}
-              />
-            ))}
-          </div>
+          <GroupedHand
+            cards={game.yourHand}
+            selectedIds={selectedCards.map((card) => card.id)}
+            newCardIds={newCardIds}
+            onSelect={canAct ? chooseCard : undefined}
+          />
 
           <div className="inquiryBar">
             <div className="inquiryChoice">
               <small>{turnInstruction}</small>
-              <strong>{placed?.name ?? selected?.name ?? "Choose an Echo"}</strong>
+              <strong>{turnMode === "bank"
+                ? selectedCards.length ? selected?.name + " · " + selectedCards.length + "/4" : "Build a matching set"
+                : selected?.name ?? "Choose an Echo"}</strong>
             </div>
-            <button className="inquireButton" type="button" onClick={inquire} disabled={!canAct || !effectiveIdentity || !placedCard}>
-              <span>{busy ? "REVEALING…" : placedCard ? `ASK ${opponent.name.toUpperCase()}` : selectedCard ? "PLACE IN CENTER" : game.currentPlayer === room.seat ? "CHOOSE A CARD" : "WAITING…"}</span>
+            <button className={"inquireButton " + (turnMode === "bank" ? "bankAction" : "")} type="button" onClick={mainAction} disabled={mainActionDisabled}>
+              <span>{mainActionLabel}</span>
               <i>✦</i>
             </button>
           </div>
@@ -1419,7 +1744,10 @@ export default function VeilboundGame() {
         const savedSettings = localStorage.getItem(SETTINGS_KEY);
         const savedStats = localStorage.getItem(STATS_KEY);
         const savedOnline = localStorage.getItem(ONLINE_KEY);
-        if (saved) setGame(JSON.parse(saved) as GameState);
+        if (saved) {
+          const restored = upgradeGameState(JSON.parse(saved));
+          if (restored) setGame(restored);
+        }
         if (savedSettings) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) });
         if (savedStats) setStats({ ...DEFAULT_STATS, ...JSON.parse(savedStats) });
         const query = new URLSearchParams(window.location.search);
@@ -1499,8 +1827,8 @@ export default function VeilboundGame() {
       setStats((current) => current.lastGameId === game.id ? current : ({
         games: current.games + 1,
         wins: current.wins + (game.winnerIds.includes(human.id) ? 1 : 0),
-        identitiesBound: current.identitiesBound + human.bound.length,
-        bestScore: Math.max(current.bestScore, human.bound.length),
+        identitiesBound: current.identitiesBound + scorePlayer(human),
+        bestScore: Math.max(current.bestScore, scorePlayer(human)),
         lastGameId: game.id,
       }));
       tone(settings.sound, "bind");
@@ -1523,8 +1851,8 @@ export default function VeilboundGame() {
       setStats((current) => current.lastGameId === onlineGame.id ? current : ({
         games: current.games + 1,
         wins: current.wins + (onlineGame.winnerIds.includes(you.id) ? 1 : 0),
-        identitiesBound: current.identitiesBound + you.bound.length,
-        bestScore: Math.max(current.bestScore, you.bound.length),
+        identitiesBound: current.identitiesBound + scorePlayer(you),
+        bestScore: Math.max(current.bestScore, scorePlayer(you)),
         lastGameId: onlineGame.id,
       }));
       tone(settings.sound, "bind");
@@ -1539,6 +1867,13 @@ export default function VeilboundGame() {
     const actor = game.players[game.currentPlayer];
     if (actor.kind !== "ai") return;
     aiTimer.current = setTimeout(() => {
+      const bank = chooseAIBank(game);
+      if (bank) {
+        const next = resolveBank(game, bank);
+        setGame(next);
+        tone(settings.sound, "bind");
+        return;
+      }
       const choice = chooseAIInquiry(game);
       if (!choice) return;
       const next = resolveInquiry(game, choice);

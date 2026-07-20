@@ -13,9 +13,9 @@ Anyone who possesses an unused invitation can take the second seat, so the inter
 ## Privacy and authority
 
 - Raw host and guest keys are returned only to their respective devices and stored as SHA-256 hashes in D1.
-- Every inquiry is validated on the server for seat, turn, target, identity, and room version.
+- Every inquiry and multi-card Bank lock is validated on the server for seat, turn, card ownership, matching identity, target, and room version.
 - Optimistic version updates prevent two simultaneous actions from both changing the same turn.
-- The server sends a player their own hand, both public hand counts and bindings, the remaining deck count, and public history.
+- The server sends a player their own hand, both public hand counts and Banks, the endless Veil draw counter, and public history.
 - Opponent cards and undealt card identities are removed before serialization.
 - Rooms expire seven days after creation.
 
@@ -28,4 +28,4 @@ The `online_rooms` D1 table stores room status, display names, hashed seat keys,
 - Deterministic tests play complete matches without deadlock.
 - Privacy assertions inspect both sanitized seat views on every simulated turn.
 - Live preview testing covers room creation, guest joining, cross-tab synchronization, a successful transfer, a denial, the exact “Draw from the Veil.” history entry, and hidden-hand boundaries.
-- Online turns use the same tap-place-ask controls and resolution receipt as local play; the server remains authoritative while the acting device presents its End Turn or Continue Turn handoff.
+- Online turns use the same Ask/Bank tabs, multi-selection, center staging, score receipts, and explicit handoffs as local play; the server remains authoritative throughout.

@@ -34,4 +34,4 @@ Veilbound combines dark botanical watercolor, antique paper, restrained gold fil
 
 ## Motion
 
-Movement is slow and deliberate: soft lifts, reveals, pulsing deck light, and curtain handoffs. Reduced-motion mode removes all nonessential animation while preserving state feedback.
+Movement is polished but quick: crisp selections, short center-stage lifts, clear Bank stamps, score fills, pulsing Veil light, and private curtain handoffs. Reduced-motion mode removes all nonessential animation while preserving state feedback.

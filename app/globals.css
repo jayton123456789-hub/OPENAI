@@ -790,6 +790,38 @@ button:disabled {
 .gameWordmark b { color: #dfc38d; font-family: var(--serif); font-size: 15px; letter-spacing: .18em; }
 .gameWordmark small { color: rgba(223, 205, 173, .45); text-align: center; font-size: 7px; letter-spacing: .11em; text-transform: uppercase; }
 
+.goalStrip {
+  min-height: 36px;
+  margin: 0 14px 3px;
+  padding: 5px 10px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(197, 170, 120, .2);
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(12, 23, 15, .78), rgba(57, 73, 48, .55), rgba(12, 23, 15, .78));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .02);
+}
+
+.goalStrip > span {
+  color: var(--gold);
+  font-size: 7px;
+  font-weight: 750;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+.goalStrip > div { display: grid; grid-template-columns: 20px 1fr 32px; align-items: center; gap: 7px; }
+.goalStrip > div > b { color: var(--paper); font-family: var(--serif); font-size: 16px; font-weight: 400; text-align: center; }
+.goalStrip > div > small { color: rgba(223,205,173,.42); font-size: 6px; letter-spacing: .1em; text-transform: uppercase; }
+
+.scoreTrack { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.scoreTrack > i { height: 5px; border: 1px solid rgba(197,170,120,.24); border-radius: 999px; background: rgba(6,13,8,.45); }
+.scoreTrack > i.filled { border-color: rgba(210,230,166,.72); background: linear-gradient(90deg, #7d925f, var(--green-glow)); box-shadow: 0 0 8px rgba(184,210,135,.38); }
+.scoreTrack.compact { width: 98px; }
+.scoreTrack.compact > i { height: 4px; }
+
 .opponents {
   min-height: 82px;
   padding: 1px 12px 4px;
@@ -918,6 +950,8 @@ button:disabled {
   text-transform: uppercase;
 }
 
+.deckButton > small em { display: block; margin-top: 2px; color: rgba(184,210,135,.62); font-family: var(--sans); font-size: 6px; font-style: normal; letter-spacing: .09em; }
+
 .deckHalo {
   position: absolute;
   width: 145px;
@@ -939,7 +973,7 @@ button:disabled {
 }
 
 .cardBack img { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: inherit; }
-.deckCount { position: absolute; right: -10px; top: -9px; min-width: 27px; height: 27px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--gold); background: #1b2a1e; color: var(--paper); font-size: 10px; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+.deckCount { position: absolute; right: -10px; top: -9px; min-width: 29px; height: 29px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--gold); background: #1b2a1e; color: var(--paper); font-family: var(--serif); font-size: 17px; box-shadow: 0 4px 12px rgba(0,0,0,.4), 0 0 14px rgba(184,210,135,.16); }
 
 .boundSummary {
   position: absolute;
@@ -975,6 +1009,15 @@ button:disabled {
 .centerSeal.readyToPlace .centerSealGlow { opacity: 1; animation: centerRing 1.35s ease-out infinite; }
 .centerSeal.placed { border-style: solid; border-color: #e1c993; animation: centerPlaced .42s cubic-bezier(.2,.9,.2,1) both; }
 .centerSeal.placed .crest { display: none; }
+.centerSeal.bankSeal { border-radius: 24px; background: radial-gradient(circle at 50% 42%, rgba(119,145,85,.14), rgba(8,17,11,.48) 68%); }
+.centerSeal.bankSeal.readyToPlace { border-color: rgba(184,210,135,.84); box-shadow: 0 0 0 4px rgba(184,210,135,.055), 0 0 34px rgba(184,210,135,.2), inset 0 0 27px rgba(184,210,135,.09); }
+.centerCardStack { width: 94px; height: 91px; position: relative; display: block; pointer-events: none; }
+.centerCardStack .veilCard { position: absolute; top: 2px; left: 50%; margin-left: -29px; }
+.centerCardStack .veilCard:nth-child(1) { transform: translateX(-18px) rotate(-8deg); }
+.centerCardStack .veilCard:nth-child(2) { transform: translateX(-6px) rotate(-3deg); }
+.centerCardStack .veilCard:nth-child(3) { transform: translateX(7px) rotate(4deg); }
+.centerCardStack .veilCard:nth-child(4) { transform: translateX(18px) rotate(8deg); }
+.centerCardStack.cards1 .veilCard { transform: none; }
 .centerSeal .veilCard { width: 59px; min-width: 59px; height: 83px; pointer-events: none; box-shadow: 0 9px 20px rgba(0,0,0,.48), 0 0 17px rgba(184,210,135,.16); animation: cardPlace .42s cubic-bezier(.18,.9,.2,1.1) both; }
 .centerSeal .veilCard .cardPortrait { inset: 9px 4px 21px; }
 .centerSeal .veilCard .cardCopy { bottom: 4px; }
@@ -989,8 +1032,10 @@ button:disabled {
 
 .boundSummary > span { color: rgba(223, 205, 173, .42); font-size: 7px; letter-spacing: .12em; text-transform: uppercase; }
 .boundRow { max-width: 98px; display: flex; flex-wrap: wrap; gap: 3px; }
-.boundRow > span:not(.emptyBound) { width: 24px; height: 24px; border-radius: 50%; overflow: hidden; border: 1px solid rgba(197,170,120,.45); }
+.boundRow > span:not(.emptyBound) { width: 27px; height: 27px; position: relative; border-radius: 50%; border: 1px solid rgba(197,170,120,.45); background: #152319; }
 .boundRow .identityPortrait { width: 100%; height: 100%; }
+.boundRow > span > .identityPortrait { overflow: hidden; border-radius: 50%; }
+.boundRow > span > b { position: absolute; right: -3px; bottom: -3px; z-index: 4; min-width: 14px; height: 14px; padding: 0 2px; display: grid; place-items: center; border: 1px solid rgba(225,201,147,.75); border-radius: 999px; background: #263b27; color: #f1ddb0; font-size: 6px; box-shadow: 0 3px 7px rgba(0,0,0,.5); }
 .emptyBound { color: rgba(223, 205, 173, .25); font-family: var(--serif); font-size: 8px; font-style: italic; }
 
 .handPanel {
@@ -1027,6 +1072,37 @@ button:disabled {
 .handHeader small { color: rgba(223,205,173,.42); font-size: 7px; text-transform: uppercase; letter-spacing: .08em; }
 .scorePill { border: 1px solid rgba(197,170,120,.25); border-radius: 999px; padding: 5px 8px; color: var(--gold); font-size: 7px; letter-spacing: .09em; text-transform: uppercase; }
 
+.actionTabs {
+  width: calc(100% - 26px);
+  min-height: 34px;
+  margin: 2px auto;
+  padding: 3px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  border: 1px solid rgba(197,170,120,.17);
+  border-radius: 12px;
+  background: rgba(6,14,9,.43);
+}
+
+.actionTabs button {
+  min-height: 27px;
+  position: relative;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(223,205,173,.43);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.actionTabs button.active { background: linear-gradient(135deg, rgba(174,147,94,.84), rgba(112,129,82,.78)); color: #101b12; box-shadow: 0 4px 11px rgba(0,0,0,.24), inset 0 0 0 1px rgba(239,218,173,.36); }
+.actionTabs button:disabled { cursor: default; }
+.actionTabs button i { min-width: 16px; height: 16px; margin-left: 4px; padding: 0 4px; display: inline-grid; place-items: center; border-radius: 999px; background: var(--green-glow); color: #132016; font-size: 7px; font-style: normal; box-shadow: 0 0 10px rgba(184,210,135,.42); }
+
 .turnSteps {
   padding: 2px 13px 1px;
   display: grid;
@@ -1055,6 +1131,46 @@ button:disabled {
 }
 
 .cardFan::-webkit-scrollbar { display: none; }
+
+.groupedHand {
+  min-height: 150px;
+  padding: 7px 15px 6px;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  mask-image: linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent);
+}
+
+.groupedHand::-webkit-scrollbar { display: none; }
+
+.handGroup {
+  flex: 0 0 auto;
+  min-width: 91px;
+  padding: 4px 5px 6px;
+  display: grid;
+  grid-template-rows: 18px 1fr;
+  align-items: end;
+  border: 1px solid rgba(197,170,120,.13);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(8,17,11,.38), rgba(8,17,11,.12));
+  scroll-snap-align: center;
+}
+
+.handGroup.bankable { border-color: rgba(184,210,135,.3); background: linear-gradient(180deg, rgba(92,111,69,.16), rgba(8,17,11,.16)); }
+.handGroup > header { padding: 0 2px; display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+.handGroup > header b { max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(238,226,201,.62); font-family: var(--serif); font-size: 8px; font-weight: 400; }
+.handGroup > header span { color: rgba(184,210,135,.62); font-size: 6px; }
+.handGroupCards { min-height: 116px; display: flex; align-items: flex-end; padding-right: 1px; }
+.handGroupCards .veilCard { width: 82px; min-width: 82px; height: 115px; }
+.handGroupCards .veilCard + .veilCard { margin-left: -31px; }
+.handGroupCards .veilCard.selected { z-index: 8; transform: translateY(-7px); }
+.largeCards .groupedHand { min-height: 165px; }
+.largeCards .handGroupCards { min-height: 130px; }
+.largeCards .handGroupCards .veilCard { width: 92px; min-width: 92px; height: 129px; }
 
 .veilCard {
   width: 93px;
@@ -1134,6 +1250,7 @@ button:disabled {
 
 .inquireButton:disabled { opacity: .45; filter: grayscale(.3); }
 .inquireButton i { font-size: 8px; font-style: normal; }
+.inquireButton.bankAction { border-color: #d8e6ad; background: linear-gradient(135deg, #68804f, #b1c782 49%, #63764b); box-shadow: inset 0 0 0 1px rgba(36,55,30,.52), 0 7px 18px rgba(0,0,0,.28), 0 0 17px rgba(184,210,135,.12); }
 
 .turnResolution {
   position: fixed;
@@ -1171,7 +1288,7 @@ button:disabled {
 .resolutionRings i { position: absolute; inset: 0; border: 1px solid rgba(184,210,135,.2); border-radius: 50%; animation: resolutionRing 2.1s ease-out infinite; }
 .resolutionRings i:nth-child(2) { animation-delay: -.7s; }
 .resolutionRings i:nth-child(3) { animation-delay: -1.4s; }
-.resolutionReveal { min-height: 202px; width: 100%; display: flex; align-items: center; justify-content: center; margin: 2px 0 3px; }
+.resolutionReveal { min-height: 202px; width: 100%; position: relative; display: flex; align-items: center; justify-content: center; margin: 2px 0 3px; }
 .receivedCard { --card-rotation: 0deg; margin-left: -23px; transform: rotate(var(--card-rotation)); transform-origin: bottom center; animation: receivedCard .68s cubic-bezier(.14,.9,.2,1.1) both; }
 .receivedCard:first-child { margin-left: 0; }
 .receivedCard:nth-child(1) { --card-rotation: -4deg; }
@@ -1181,20 +1298,25 @@ button:disabled {
 .receivedCard .veilCard { width: 84px; min-width: 84px; height: 118px; box-shadow: 0 17px 30px rgba(0,0,0,.55), 0 0 21px rgba(184,210,135,.13); }
 .resolutionIdentity { width: 126px; height: 126px; padding: 6px; border: 1px solid #e1c993; border-radius: 50%; background: #18271a; box-shadow: 0 0 0 8px rgba(197,170,120,.06), 0 0 48px rgba(184,210,135,.24); animation: identityBind .8s cubic-bezier(.16,.9,.2,1.05) both; }
 .resolutionIdentity .identityPortrait { width: 100%; height: 100%; border-radius: 50%; }
-.bindingMark { position: absolute; top: 257px; left: 50%; min-width: 92px; padding: 7px 12px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid rgba(225,201,147,.62); border-radius: 999px; background: #243525; color: #f0dcae; transform: translateX(-50%); box-shadow: 0 8px 22px rgba(0,0,0,.45); animation: bindingStamp .52s .55s cubic-bezier(.18,.9,.25,1.15) both; }
+.bindingMark { position: absolute; bottom: 9px; left: 50%; min-width: 92px; padding: 7px 12px; display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid rgba(225,201,147,.62); border-radius: 999px; background: #243525; color: #f0dcae; transform: translateX(-50%); box-shadow: 0 8px 22px rgba(0,0,0,.45); animation: bindingStamp .52s .55s cubic-bezier(.18,.9,.25,1.15) both; }
 .bindingMark i { font-style: normal; font-size: 7px; }
 .bindingMark b { font-size: 7px; letter-spacing: .16em; }
+.resolutionGoal { width: min(100%, 280px); margin: -3px auto 12px; display: grid; gap: 6px; }
+.resolutionGoal > span { height: 7px; overflow: hidden; border: 1px solid rgba(197,170,120,.28); border-radius: 999px; background: rgba(5,12,8,.54); }
+.resolutionGoal > span > i { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, #718b58, var(--green-glow)); box-shadow: 0 0 13px rgba(184,210,135,.42); animation: goalFill .72s .3s cubic-bezier(.2,.85,.25,1) both; transform-origin: left; }
+.resolutionGoal > b { color: var(--green-glow); font-size: 8px; letter-spacing: .14em; }
 .resolutionMessage { max-width: 330px; min-height: 42px; margin: 0 auto 17px; color: rgba(238,226,201,.62); font-family: var(--serif); font-size: 12px; line-height: 1.55; }
 .resolutionAction { width: 100%; min-height: 61px; margin-top: auto; padding: 0 21px; display: flex; align-items: center; justify-content: space-between; border: 1px solid #e1c993; border-radius: 17px; background: linear-gradient(135deg, #9b8253, #d0b476 52%, #8a7046); color: #111b12; box-shadow: inset 0 0 0 1px rgba(65,45,16,.5), 0 11px 26px rgba(0,0,0,.34); font-family: var(--serif); font-size: 15px; font-weight: 700; letter-spacing: .04em; cursor: pointer; animation: actionInvite 1.5s 1s ease-in-out infinite; }
 .resolutionAction i { width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid rgba(17,27,18,.42); border-radius: 50%; font-style: normal; }
 .turnResolution.draw .resolutionPanel { background: radial-gradient(circle at 50% 35%, rgba(157,130,78,.2), transparent 37%), linear-gradient(180deg, rgba(49,58,39,.99), rgba(9,19,12,.995)); }
-.turnResolution.bind .resolutionPanel { border-color: rgba(184,210,135,.72); box-shadow: 0 35px 95px rgba(0,0,0,.7), 0 0 55px rgba(184,210,135,.17), inset 0 0 0 7px rgba(184,210,135,.04); }
+.turnResolution.bank .resolutionPanel { border-color: rgba(184,210,135,.72); background: radial-gradient(circle at 50% 34%, rgba(184,210,135,.2), transparent 38%), linear-gradient(180deg, rgba(43,58,40,.99), rgba(9,19,12,.995)); box-shadow: 0 35px 95px rgba(0,0,0,.7), 0 0 55px rgba(184,210,135,.17), inset 0 0 0 7px rgba(184,210,135,.04); }
 @keyframes resolutionFade { from { opacity: 0; } }
 @keyframes resolutionRise { from { opacity: 0; transform: translateY(35px) scale(.94); } }
 @keyframes resolutionRing { 0% { inset: 46%; opacity: .75; } 100% { inset: 0; opacity: 0; } }
 @keyframes receivedCard { 0% { opacity: 0; transform: translateY(-95px) scale(.55) rotate(13deg); } 68% { transform: translateY(7px) scale(1.05) rotate(-2deg); } 100% { opacity: 1; transform: rotate(var(--card-rotation)); } }
 @keyframes identityBind { from { opacity: 0; transform: scale(.45) rotate(-18deg); filter: brightness(1.8); } 66% { transform: scale(1.08) rotate(2deg); } }
 @keyframes bindingStamp { from { opacity: 0; transform: translateX(-50%) scale(1.7); } }
+@keyframes goalFill { from { transform: scaleX(0); } }
 @keyframes actionInvite { 50% { box-shadow: inset 0 0 0 1px rgba(65,45,16,.5), 0 15px 31px rgba(0,0,0,.4), 0 0 18px rgba(225,201,147,.2); } }
 
 .modalScrim,
@@ -1346,6 +1468,16 @@ button:disabled {
 .tutorialStage { width: 100%; min-height: 218px; margin-top: auto; display: flex; align-items: center; justify-content: center; gap: 18px; position: relative; }
 .tutorialStage .veilCard { animation: tutorialFloat 2.7s ease-in-out infinite; }
 @keyframes tutorialFloat { 50% { transform: translateY(-7px) rotate(.6deg); } }
+.tutorialGoal { width: min(100%, 310px); display: grid; grid-template-columns: 48px 1fr; align-items: center; gap: 8px 12px; }
+.tutorialGoal > strong { grid-row: 1 / 3; color: var(--paper); font-family: var(--serif); font-size: 52px; font-weight: 400; }
+.tutorialGoal > span { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.tutorialGoal > span i { height: 9px; border: 1px solid rgba(197,170,120,.35); border-radius: 999px; background: rgba(8,17,11,.45); }
+.tutorialGoal > b { color: var(--green-glow); font-size: 9px; letter-spacing: .18em; text-align: left; }
+.tutorialDeck { display: flex; align-items: center; gap: 26px; text-align: left; }
+.tutorialDeck .cardBack { width: 86px; }
+.tutorialDeck > span { display: grid; gap: 5px; }
+.tutorialDeck b { color: var(--paper); font-family: var(--serif); font-size: 18px; font-weight: 400; }
+.tutorialDeck small { max-width: 150px; color: rgba(238,226,201,.5); font-size: 8px; line-height: 1.5; letter-spacing: .08em; text-transform: uppercase; }
 .echoSet { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: min(100%, 300px); }
 .echoSet span, .tutorialModes span { padding: 16px 10px; border: 1px solid rgba(197,170,120,.27); border-radius: 14px; color: var(--paper); background: rgba(34, 49, 35, .72); font-family: var(--serif); font-size: 13px; }
 .tutorialDrop { width: 142px; min-height: 128px; padding: 10px; display: grid; place-items: center; align-content: center; gap: 4px; border: 1px dashed rgba(197,170,120,.45); border-radius: 19px; color: rgba(238,226,201,.5); background: rgba(8,17,11,.34); font-size: 9px; line-height: 1.4; transition: border-color .2s ease, background .2s ease, transform .2s ease; }
@@ -1358,6 +1490,16 @@ button:disabled {
 .tutorialScore { display: grid; justify-items: center; color: var(--paper); }
 .tutorialScore strong { margin-top: -5px; color: var(--green-glow); font-family: var(--serif); font-size: 34px; }
 .tutorialScore span { font-family: var(--serif); font-size: 12px; }
+.tutorialBankPractice { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 122px; align-items: center; gap: 12px; }
+.tutorialBankCards { min-width: 0; display: flex; justify-content: center; }
+.tutorialBankCards .veilCard { width: 83px; min-width: 83px; height: 116px; }
+.tutorialBankCards .veilCard + .veilCard { margin-left: -21px; }
+.tutorialBankPractice .tutorialDrop { width: 122px; min-height: 116px; }
+.tutorialTiers { width: min(100%, 330px); display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.tutorialTiers > span { min-height: 105px; display: grid; place-items: center; align-content: center; gap: 6px; border: 1px solid rgba(197,170,120,.24); border-radius: 16px; background: rgba(24,39,27,.66); }
+.tutorialTiers > span.best { border-color: rgba(184,210,135,.62); background: linear-gradient(180deg, rgba(109,133,79,.32), rgba(24,39,27,.72)); box-shadow: 0 0 20px rgba(184,210,135,.12); }
+.tutorialTiers b { color: rgba(238,226,201,.62); font-family: var(--serif); font-size: 10px; font-weight: 400; }
+.tutorialTiers strong { color: var(--green-glow); font-family: var(--serif); font-size: 28px; font-weight: 400; }
 .tutorialModes { width: 100%; display: grid; gap: 8px; }
 .tutorialHint { min-height: 35px; margin: 0; color: var(--green-glow); font-size: 9px; line-height: 1.5; }
 .tutorialActions { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 9px; margin-top: 12px; }
@@ -1395,6 +1537,13 @@ button:disabled {
   .modeArt { width: 76px; transform: scale(.8); }
   .veilCard { width: 84px; min-width: 84px; height: 118px; }
   .cardFan { min-height: 134px; }
+  .goalStrip { margin-inline: 9px; gap: 7px; padding-inline: 7px; }
+  .goalStrip > span { font-size: 6px; }
+  .goalStrip > div { grid-template-columns: 16px 1fr 27px; gap: 4px; }
+  .groupedHand { padding-inline: 9px; gap: 6px; }
+  .handGroup { min-width: 83px; }
+  .handGroupCards .veilCard { width: 75px; min-width: 75px; height: 105px; }
+  .handGroupCards .veilCard + .veilCard { margin-left: -29px; }
   .tableCenter { min-height: 170px; padding-inline: 8px; }
   .centerSeal { width: 112px; height: 133px; }
   .tableCenter > .deckButton { --deck-scale: .7; right: 8px; }
@@ -1412,6 +1561,7 @@ button:disabled {
   .titleMark h1 { margin-top: 8px; }
   .titleLine { margin-top: 7px; }
   .opponents { min-height: 70px; }
+  .goalStrip { min-height: 30px; padding-block: 3px; margin-bottom: 1px; }
   .medallion { width: 40px; height: 40px; }
   .messageRibbon { min-height: 46px; }
   .tableCenter { min-height: 145px; }
@@ -1421,8 +1571,15 @@ button:disabled {
   .tableCenter > .deckButton { --deck-scale: .68; }
   .cardBack { width: 60px; }
   .handHeader { height: 26px; }
+  .actionTabs { min-height: 29px; margin-block: 0; }
+  .actionTabs button { min-height: 23px; }
   .turnSteps span { min-height: 18px; }
   .cardFan { min-height: 124px; }
+  .groupedHand { min-height: 122px; padding-block: 4px; }
+  .handGroup { grid-template-rows: 15px 1fr; }
+  .handGroupCards { min-height: 94px; }
+  .handGroupCards .veilCard { width: 70px; min-width: 70px; height: 98px; }
+  .handGroupCards .veilCard + .veilCard { margin-left: -26px; }
   .veilCard { width: 80px; min-width: 80px; height: 112px; }
   .inquiryBar { min-height: 50px; }
   .inquireButton { min-height: 42px; }

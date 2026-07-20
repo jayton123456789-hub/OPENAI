@@ -33,11 +33,14 @@ test("renders development preview metadata", async () => {
   assert.match(await response.text(), developmentPreviewMeta);
 });
 
-test("uses the tap-place-ask flow with explicit turn handoffs", async () => {
+test("uses clear Ask and Bank flows with an endless Veil and explicit handoffs", async () => {
   const source = await readFile(new URL("../app/veilbound-game.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /Step 1 · Tap a card in your hand/);
-  assert.match(source, /Step 2 · Tap the center to place/);
+  assert.match(source, /type TurnMode = "ask" \| "bank"/);
+  assert.match(source, /Select 2–4 matching cards/);
+  assert.match(source, /The Endless Veil/);
+  assert.match(source, /LOCK · \+/);
+  assert.match(source, /FIRST TO \{WIN_SCORE\}/);
   assert.match(source, /"Continue turn" \| "End turn" \| "See final revelation"/);
   assert.match(source, /className="resolutionAction"/);
   assert.doesNotMatch(source, /onPointerDrop|pointerDragging|dragReady/);

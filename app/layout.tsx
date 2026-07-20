@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Veilbound — A Game of Hidden Identities",
   description:
-    "Enter the circle, inquire after masked identities, and bind every echo before your rivals.",
+    "Enter the circle, inquire after masked identities, bank matching Echoes, and race to seven Bounds.",
   applicationName: "Veilbound",
   appleWebApp: {
     capable: true,

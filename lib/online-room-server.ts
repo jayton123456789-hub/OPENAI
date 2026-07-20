@@ -1,6 +1,6 @@
 import { ensureRoomsSchema, getRoomsDb } from "@/db/rooms";
 import type { OnlineRoomRow } from "@/db/schema";
-import { createGame, resolveInquiry, type GameState } from "@/lib/veilbound";
+import { createGame, resolveBank, resolveInquiry, upgradeGameState, type GameState } from "@/lib/veilbound";
 import {
   createOnlineGameView,
   type OnlineAction,
@@ -58,7 +58,9 @@ function safeEqual(left: string, right: string) {
 function parseState(row: OnlineRoomRow) {
   if (!row.stateJson) return null;
   try {
-    return JSON.parse(row.stateJson) as GameState;
+    const state = upgradeGameState(JSON.parse(row.stateJson));
+    if (!state) throw new Error("Unreadable state");
+    return state;
   } catch {
     throw new OnlineRoomError("This circle can no longer be read.", 500);
   }
@@ -124,6 +126,12 @@ function isOnlineAction(value: unknown): value is OnlineAction {
   const action = value as Record<string, unknown>;
   if (!Number.isInteger(action.version)) return false;
   if (action.type === "rematch") return true;
+  if (action.type === "bank") {
+    return Array.isArray(action.cardIds)
+      && action.cardIds.length >= 2
+      && action.cardIds.length <= 4
+      && action.cardIds.every((cardId) => typeof cardId === "string");
+  }
   return action.type === "inquire"
     && typeof action.targetId === "string"
     && typeof action.identityId === "string";
@@ -226,7 +234,7 @@ export async function applyOnlineAction(roomId: string, token: string, action: u
       current.players.map((player) => ({ name: player.name, kind: "human" as const })),
       { mode: "online", difficulty: "seer" },
     );
-  } else {
+  } else if (action.type === "inquire") {
     if (current.status !== "active") throw new OnlineRoomError("This rite has already ended.", 409);
     if (current.currentPlayer !== seat) throw new OnlineRoomError("Wait for the other seeker’s turn.", 409);
     next = resolveInquiry(current, {
@@ -235,6 +243,14 @@ export async function applyOnlineAction(roomId: string, token: string, action: u
       identityId: action.identityId,
     });
     if (next === current) throw new OnlineRoomError("That inquiry is not legal.", 400);
+  } else {
+    if (current.status !== "active") throw new OnlineRoomError("This rite has already ended.", 409);
+    if (current.currentPlayer !== seat) throw new OnlineRoomError("Wait for the other seeker’s turn.", 409);
+    next = resolveBank(current, {
+      actorId: current.players[seat].id,
+      cardIds: action.cardIds,
+    });
+    if (next === current) throw new OnlineRoomError("Those cards cannot be locked together.", 400);
   }
 
   const now = Date.now();

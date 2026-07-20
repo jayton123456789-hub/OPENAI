@@ -1,22 +1,25 @@
 # Veilbound
 
-Veilbound is a complete portrait-first card game about masked identities, hidden information, and memory. Players inquire after identities already held in their hand, collect the four Echoes of each identity, and bind more complete identities than their rivals.
+Veilbound is a complete portrait-first card game about masked identities, hidden information, and memory. Players inquire after identities already held in their hand, decide when to protect matching cards in a public Bank, and race to seven Bounds.
 
 When a rival has none of the requested identity, the official response is:
 
 > **Draw from the Veil.**
 
-## Finished First Edition 1.2 features
+## Finished Second Edition 2.0 features
 
-- Complete 52-card rules engine with 13 identities and four Echoes per identity
+- Familiar 52-card identity cycle backed by an endless central Veil that automatically reshuffles
+- Deliberate risk-and-reward Bank: pairs score 1 Bound, trios score 2, and four-card sets score 3
+- First-to-seven victory condition with permanent public score tracks
 - Solo play with one or two fair AI rivals across three difficulty levels
 - Private two-device invitations with synchronized turns and no account requirement
 - Two-to-four-player pass-and-play with private handoff curtains
-- Seven-step guided tutorial with an interactive practice hand
-- Clear tap-place-ask turns: tap a card, tap the center seal, then confirm the inquiry
-- Animated card receipts, bindings, public events, and explicit Continue Turn / End Turn handoffs
+- Nine-step guided tutorial with interactive Ask and multi-card Bank practice
+- Separate Ask and Bank modes with tap-to-select, tap-to-stage, and clear confirmation actions
+- Hands grouped visually by identity for quick scanning on narrow phone screens
+- Animated draw, transfer, Bank, score, public-event, and Continue Turn / End Turn receipts
 - Full title, mode selection, setup, rules, pause, settings, history, results, rematch, and chronicle flows
-- Automatic binding, empty-hand recovery, ties, end-game scoring, and edge-case handling
+- Empty-hand recovery, unlimited draw cycles, immediate seven-Bound victory, and edge-case handling
 - Local autosave and one-tap continuation after closing or refreshing the app
 - Optional sound, haptics, reduced motion, and enlarged cards
 - Responsive mobile-first interface with touch and keyboard accessibility

@@ -2,7 +2,7 @@
 
 The collection has four locked titles:
 
-1. **Veilbound** — a finished hidden-information card game about collecting and binding four Echoes of each masked identity.
+1. **Veilbound** — a finished hidden-information card game about asking for masked identities, banking matching Echoes, and racing to seven Bounds.
 2. **Realm Roll** — the next title reserved for a dice-led realm game; its final rules and visual identity will be designed as a separate production phase.
 3. **Kings Cups** — the third title, reserved for a social card experience with its own rules, safety options, and tutorial.
 4. **Wicked Words** — the fourth title, reserved for a fast word game with its own dictionary, moderation, scoring, and AI requirements.
@@ -31,4 +31,4 @@ Each game must keep its own:
 - How-to-play content
 - Match history and scoring model
 
-No empty or “coming soon” buttons are shown in Veilbound First Edition. Realm Roll, Kings Cups, and Wicked Words should appear in the product only when each one is playable end to end.
+No empty or “coming soon” buttons are shown in Veilbound Second Edition. Realm Roll, Kings Cups, and Wicked Words should appear in the product only when each one is playable end to end.

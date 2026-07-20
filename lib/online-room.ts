@@ -1,4 +1,4 @@
-import type { GameEvent, GameState, IdentityId, VeilCard } from "./veilbound";
+import type { BankedBound, GameEvent, GameState, IdentityId, VeilCard } from "./veilbound";
 
 export type OnlineRoomStatus = "waiting" | "active" | "complete";
 
@@ -6,7 +6,7 @@ export interface OnlinePlayerView {
   id: string;
   name: string;
   handCount: number;
-  bound: IdentityId[];
+  bound: BankedBound[];
 }
 
 export interface OnlineGameView {
@@ -15,6 +15,7 @@ export interface OnlineGameView {
   players: OnlinePlayerView[];
   yourHand: VeilCard[];
   deckCount: number;
+  veilDraws: number;
   currentPlayer: number;
   turn: number;
   status: "active" | "complete";
@@ -54,7 +55,13 @@ export interface OnlineRematchAction {
   version: number;
 }
 
-export type OnlineAction = OnlineInquiryAction | OnlineRematchAction;
+export interface OnlineBankAction {
+  type: "bank";
+  version: number;
+  cardIds: string[];
+}
+
+export type OnlineAction = OnlineInquiryAction | OnlineBankAction | OnlineRematchAction;
 
 export function createOnlineGameView(game: GameState, seat: 0 | 1): OnlineGameView {
   return {
@@ -64,10 +71,11 @@ export function createOnlineGameView(game: GameState, seat: 0 | 1): OnlineGameVi
       id: player.id,
       name: player.name,
       handCount: player.hand.length,
-      bound: [...player.bound],
+      bound: player.bound.map((entry) => ({ ...entry, cards: [...entry.cards] })),
     })),
     yourHand: [...(game.players[seat]?.hand ?? [])],
     deckCount: game.deck.length,
+    veilDraws: game.veilDraws,
     currentPlayer: game.currentPlayer,
     turn: game.turn,
     status: game.status,

@@ -16,6 +16,8 @@ export const IDENTITIES = [
 
 export const ECHOES = ["Memory", "Desire", "Fear", "Truth"] as const;
 
+export const WIN_SCORE = 7;
+
 export type IdentityId = (typeof IDENTITIES)[number]["id"];
 export type EchoName = (typeof ECHOES)[number];
 export type Difficulty = "novice" | "adept" | "seer";
@@ -28,12 +30,19 @@ export interface VeilCard {
   echo: EchoName;
 }
 
+export interface BankedBound {
+  id: string;
+  identityId: IdentityId;
+  cards: VeilCard[];
+  points: number;
+}
+
 export interface PlayerState {
   id: string;
   name: string;
   kind: PlayerKind;
   hand: VeilCard[];
-  bound: IdentityId[];
+  bound: BankedBound[];
 }
 
 export interface GameEvent {
@@ -47,13 +56,15 @@ export interface GameEvent {
 }
 
 export interface GameState {
-  version: 1;
+  version: 2;
   id: string;
   createdAt: number;
   mode: GameMode;
   difficulty: Difficulty;
   players: PlayerState[];
   deck: VeilCard[];
+  deckCycle: number;
+  veilDraws: number;
   currentPlayer: number;
   turn: number;
   status: "active" | "complete";
@@ -71,6 +82,11 @@ export interface InquiryChoice {
   actorId: string;
   targetId: string;
   identityId: IdentityId;
+}
+
+export interface BankChoice {
+  actorId: string;
+  cardIds: string[];
 }
 
 function rng(seed: number) {
@@ -101,7 +117,7 @@ function copyState(state: GameState): GameState {
     players: state.players.map((player) => ({
       ...player,
       hand: [...player.hand],
-      bound: [...player.bound],
+      bound: player.bound.map((entry) => ({ ...entry, cards: [...entry.cards] })),
     })),
     events: [...state.events],
     winnerIds: [...state.winnerIds],
@@ -125,50 +141,51 @@ function present(name: string, direct: string, thirdPerson: string) {
   return name.toLowerCase() === "you" ? direct : thirdPerson;
 }
 
-function bindCompleted(state: GameState, playerIndex: number) {
-  const player = state.players[playerIndex];
-  const counts = new Map<IdentityId, number>();
-  player.hand.forEach((card) => {
-    counts.set(card.identityId, (counts.get(card.identityId) ?? 0) + 1);
-  });
+export function boundValueForCardCount(count: number) {
+  return count >= 2 && count <= 4 ? count - 1 : 0;
+}
 
-  for (const [identityId, count] of counts) {
-    if (count < 4 || player.bound.includes(identityId)) continue;
-    player.hand = player.hand.filter((card) => card.identityId !== identityId);
-    player.bound.push(identityId);
-    const identity = getIdentity(identityId);
-    addEvent(state, {
-      actorId: player.id,
-      identityId,
-      success: true,
-      text: `${player.name} bound ${identity.name}.`,
-    });
-  }
+export function scorePlayer(player: Pick<PlayerState, "bound">) {
+  return player.bound.reduce((total, entry) => total + entry.points, 0);
+}
+
+export function bankableGroups(player: Pick<PlayerState, "hand">) {
+  const groups = new Map<IdentityId, VeilCard[]>();
+  player.hand.forEach((card) => {
+    groups.set(card.identityId, [...(groups.get(card.identityId) ?? []), card]);
+  });
+  return [...groups.entries()]
+    .filter(([, cards]) => cards.length >= 2)
+    .map(([identityId, cards]) => ({ identityId, cards }));
 }
 
 function drawForEmptyHand(state: GameState, playerIndex: number) {
   const player = state.players[playerIndex];
-  if (player.hand.length === 0 && state.deck.length > 0) {
-    const card = state.deck.pop();
+  if (player.hand.length === 0) {
+    const card = drawFromVeil(state);
     if (card) player.hand.push(card);
   }
 }
 
+function drawFromVeil(state: GameState) {
+  if (state.deck.length === 0) {
+    const cycle = state.deckCycle;
+    state.deck = shuffle(buildDeck(cycle), state.createdAt + cycle * 7919);
+    state.deckCycle += 1;
+  }
+  const card = state.deck.pop();
+  if (card) state.veilDraws += 1;
+  return card;
+}
+
 function finishIfComplete(state: GameState) {
-  const boundCount = state.players.reduce(
-    (total, player) => total + player.bound.length,
-    0,
-  );
-  const noCardsRemain =
-    state.deck.length === 0 &&
-    state.players.every((player) => player.hand.length === 0);
+  const highScore = Math.max(...state.players.map(scorePlayer));
+  const targetReached = highScore >= WIN_SCORE;
+  if (!targetReached) return false;
 
-  if (boundCount < IDENTITIES.length && !noCardsRemain) return false;
-
-  const highScore = Math.max(...state.players.map((player) => player.bound.length));
   state.status = "complete";
   state.winnerIds = state.players
-    .filter((player) => player.bound.length === highScore)
+    .filter((player) => scorePlayer(player) === highScore)
     .map((player) => player.id);
   const winners = state.players
     .filter((player) => state.winnerIds.includes(player.id))
@@ -177,7 +194,7 @@ function finishIfComplete(state: GameState) {
   addEvent(state, {
     actorId: state.winnerIds[0] ?? "veil",
     success: true,
-    text: `${winners} ${state.winnerIds.length > 1 ? "share" : present(winners, "claim", "claims")} the final revelation.`,
+    text: `${winners} ${state.winnerIds.length > 1 ? "reach" : present(winners, "reach", "reaches")} seven Bounds and ${state.winnerIds.length > 1 ? "share" : present(winners, "claim", "claims")} the final revelation.`,
   });
   return true;
 }
@@ -200,10 +217,10 @@ export function getIdentity(identityId: IdentityId) {
   return IDENTITIES.find((identity) => identity.id === identityId) ?? IDENTITIES[0];
 }
 
-export function buildDeck(): VeilCard[] {
+export function buildDeck(cycle = 0): VeilCard[] {
   return IDENTITIES.flatMap((identity) =>
     ECHOES.map((echo) => ({
-      id: `${identity.id}-${echo.toLowerCase()}`,
+      id: `${identity.id}-${echo.toLowerCase()}${cycle > 0 ? `-veil-${cycle}` : ""}`,
       identityId: identity.id,
       echo,
     })),
@@ -237,22 +254,23 @@ export function createGame(
   }
 
   const state: GameState = {
-    version: 1,
+    version: 2,
     id: `veil-${createdAt}`,
     createdAt,
     mode: options.mode,
     difficulty: options.difficulty ?? "adept",
     players,
     deck,
+    deckCycle: 1,
+    veilDraws: 0,
     currentPlayer: 0,
     turn: 1,
     status: "active",
     events: [],
-    lastMessage: "The Veil parts. Choose an identity to inquire after.",
+    lastMessage: "The endless Veil stirs. Ask for an identity or lock a set into your Bank.",
     winnerIds: [],
   };
 
-  players.forEach((_, index) => bindCompleted(state, index));
   players.forEach((_, index) => drawForEmptyHand(state, index));
   return state;
 }
@@ -299,7 +317,6 @@ export function resolveInquiry(
       success: true,
       text: `${target.name} reveals ${offered.length} ${offered.length === 1 ? "echo" : "echoes"}. ${actor.name} ${present(actor.name, "inquire", "inquires")} again.`,
     });
-    bindCompleted(state, actorIndex);
     drawForEmptyHand(state, actorIndex);
     drawForEmptyHand(state, targetIndex);
     finishIfComplete(state);
@@ -314,7 +331,7 @@ export function resolveInquiry(
     text: `${target.name}: “Draw from the Veil.”`,
   });
 
-  const drawn = state.deck.pop();
+  const drawn = drawFromVeil(state);
   if (drawn) actor.hand.push(drawn);
   const luckyDraw = drawn?.identityId === choice.identityId;
 
@@ -325,7 +342,6 @@ export function resolveInquiry(
       success: true,
       text: `The Veil answers with ${identity.name}. ${actor.name} ${present(actor.name, "inquire", "inquires")} again.`,
     });
-    bindCompleted(state, actorIndex);
     drawForEmptyHand(state, actorIndex);
     finishIfComplete(state);
     return state;
@@ -342,17 +358,95 @@ export function resolveInquiry(
     addEvent(state, {
       actorId: actor.id,
       success: false,
-      text: "The Veil is empty.",
+      text: "The Veil turns, but no Echo answers.",
     });
   }
 
-  bindCompleted(state, actorIndex);
   advanceTurn(state);
+  return state;
+}
+
+export function resolveBank(source: GameState, choice: BankChoice): GameState {
+  if (source.status !== "active") return source;
+  const state = copyState(source);
+  const actorIndex = state.players.findIndex((player) => player.id === choice.actorId);
+  if (actorIndex !== state.currentPlayer) return source;
+
+  const actor = state.players[actorIndex];
+  const uniqueIds = [...new Set(choice.cardIds)];
+  if (uniqueIds.length < 2 || uniqueIds.length > 4) return source;
+  const cards = uniqueIds
+    .map((cardId) => actor.hand.find((card) => card.id === cardId))
+    .filter((card): card is VeilCard => Boolean(card));
+  if (cards.length !== uniqueIds.length) return source;
+  const identityId = cards[0].identityId;
+  if (!cards.every((card) => card.identityId === identityId)) return source;
+
+  const points = boundValueForCardCount(cards.length);
+  if (!points) return source;
+  const identity = getIdentity(identityId);
+  const selected = new Set(uniqueIds);
+  actor.hand = actor.hand.filter((card) => !selected.has(card.id));
+  actor.bound.push({
+    id: `${actor.id}-${identityId}-${state.turn}-${actor.bound.length + 1}`,
+    identityId,
+    cards,
+    points,
+  });
+  addEvent(state, {
+    actorId: actor.id,
+    identityId,
+    success: true,
+    text: `${actor.name} ${present(actor.name, "lock", "locks")} ${cards.length} Echoes of ${identity.name} into the Bank for ${points} ${points === 1 ? "Bound" : "Bounds"}.`,
+  });
+
+  if (finishIfComplete(state)) return state;
+  drawForEmptyHand(state, actorIndex);
+  finishIfComplete(state);
   return state;
 }
 
 function choose<T>(items: T[], random: () => number) {
   return items[Math.floor(random() * items.length)];
+}
+
+export function chooseAIBank(state: GameState): BankChoice | null {
+  const actor = state.players[state.currentPlayer];
+  if (!actor || actor.kind !== "ai" || state.status !== "active") return null;
+  const groups = bankableGroups(actor)
+    .map((group) => ({
+      ...group,
+      points: boundValueForCardCount(group.cards.length),
+    }))
+    .sort((a, b) => b.cards.length - a.cards.length);
+  if (!groups.length) return null;
+
+  const currentScore = scorePlayer(actor);
+  const leadingRival = Math.max(
+    0,
+    ...state.players.filter((player) => player.id !== actor.id).map(scorePlayer),
+  );
+  const winning = groups.find((group) => currentScore + group.points >= WIN_SCORE);
+  if (winning) return { actorId: actor.id, cardIds: winning.cards.map((card) => card.id) };
+
+  const complete = groups.find((group) => group.cards.length === 4);
+  if (complete) return { actorId: actor.id, cardIds: complete.cards.map((card) => card.id) };
+
+  let candidate: (typeof groups)[number] | undefined;
+  if (state.difficulty === "novice") {
+    candidate = groups[0];
+  } else if (state.difficulty === "adept") {
+    candidate = groups.find((group) => group.cards.length >= 3)
+      ?? (state.deck.length <= 16 || actor.hand.length >= 10 ? groups[0] : undefined);
+  } else {
+    candidate = groups.find((group) =>
+      group.cards.length >= 3
+      && (state.deck.length <= 26 || currentScore >= 3 || leadingRival >= 5),
+    ) ?? (state.deck.length <= 8 || actor.hand.length >= 12 || leadingRival >= 6 ? groups[0] : undefined);
+  }
+  return candidate
+    ? { actorId: actor.id, cardIds: candidate.cards.map((card) => card.id) }
+    : null;
 }
 
 function publicHoldingConfidence(
@@ -376,8 +470,8 @@ function publicHoldingConfidence(
       confidence = -12;
     }
     if (event.actorId === playerId && text.includes("veil answers")) confidence = 8;
-    // Bound identities leave the hand and cannot be requested from that seeker.
-    if (event.actorId === playerId && text.includes(" bound ")) confidence = -20;
+    // Banking moves known cards out of a hand, without proving no matching Echo remains.
+    if (event.actorId === playerId && text.includes("into the bank")) confidence = Math.min(confidence, -2);
   }
   return confidence;
 }
@@ -436,4 +530,50 @@ export function sortHand(cards: VeilCard[]) {
     if (byIdentity !== 0) return byIdentity;
     return ECHOES.indexOf(a.echo) - ECHOES.indexOf(b.echo);
   });
+}
+
+export function upgradeGameState(value: unknown): GameState | null {
+  if (!value || typeof value !== "object") return null;
+  const source = value as GameState & {
+    version?: number;
+    players?: Array<Omit<PlayerState, "bound"> & { bound?: Array<BankedBound | IdentityId> }>;
+  };
+  if (!Array.isArray(source.players) || !Array.isArray(source.deck)) return null;
+
+  const players = source.players.map((player) => ({
+    ...player,
+    hand: Array.isArray(player.hand) ? [...player.hand] : [],
+    bound: (Array.isArray(player.bound) ? player.bound : []).map((entry, index): BankedBound => {
+      if (typeof entry !== "string") {
+        return {
+          ...entry,
+          cards: Array.isArray(entry.cards) ? [...entry.cards] : [],
+          points: boundValueForCardCount(entry.cards?.length ?? 0) || entry.points || 1,
+        };
+      }
+      return {
+        id: `${player.id}-${entry}-legacy-${index + 1}`,
+        identityId: entry,
+        cards: ECHOES.map((echo) => ({
+          id: `${entry}-${echo.toLowerCase()}`,
+          identityId: entry,
+          echo,
+        })),
+        points: 3,
+      };
+    }),
+  }));
+
+  const state: GameState = {
+    ...source,
+    version: 2,
+    players,
+    deck: [...source.deck],
+    deckCycle: Number.isInteger(source.deckCycle) ? source.deckCycle : 1,
+    veilDraws: Number.isInteger(source.veilDraws) ? source.veilDraws : 0,
+    events: Array.isArray(source.events) ? [...source.events] : [],
+    winnerIds: Array.isArray(source.winnerIds) ? [...source.winnerIds] : [],
+  };
+  if (state.status === "active") finishIfComplete(state);
+  return state;
 }
